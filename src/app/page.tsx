@@ -27,15 +27,6 @@ export default function Home() {
             <p className="text-xl font-bold text-indigo-700">Well-Sleep</p>
             <p className="text-sm text-indigo-400 mt-1">매일 수면시간을 기록하고 평균을 확인해요</p>
           </Link>
-
-          <Link
-            href="/cartier"
-            className="block rounded-2xl p-6 bg-red-50 border border-red-100 shadow-md hover:bg-red-100"
-          >
-            <div className="text-5xl mb-2">💎</div>
-            <p className="text-xl font-bold text-red-900">까르띠에 재고 알림</p>
-            <p className="text-sm text-red-400 mt-1">품절 상품이 재입고되면 휴대폰으로 알려드려요</p>
-          </Link>
         </div>
       </div>
     </div>
