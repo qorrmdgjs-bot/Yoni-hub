@@ -97,6 +97,9 @@ export default function SleepInputPage() {
             <Link href="/sleep" className="px-4 py-2 bg-indigo-100 text-indigo-600 rounded-lg hover:bg-indigo-200 text-sm">
               달력 보기
             </Link>
+            <Link href="/sleep/past-input" className="px-4 py-2 bg-indigo-100 text-indigo-600 rounded-lg hover:bg-indigo-200 text-sm">
+              과거 입력
+            </Link>
             <Link href="/sleep/graph" className="px-4 py-2 bg-indigo-100 text-indigo-600 rounded-lg hover:bg-indigo-200 text-sm">
               그래프 보기
             </Link>

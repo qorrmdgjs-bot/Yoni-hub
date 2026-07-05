@@ -55,6 +55,9 @@ export default function SleepDashboardPage() {
           <Link href="/sleep/graph" className="text-center px-4 py-3 bg-indigo-400 text-white rounded-xl hover:bg-indigo-500 font-medium text-sm">
             그래프
           </Link>
+          <Link href="/sleep/past-input" className="col-span-2 text-center px-4 py-3 bg-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-200 font-medium text-sm">
+            과거 수면 입력
+          </Link>
           <Link href="/sleep/analysis" className="col-span-2 text-center px-4 py-3 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 font-medium text-sm">
             AI 수면 분석 🌙
           </Link>
