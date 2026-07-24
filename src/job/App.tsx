@@ -6,6 +6,7 @@ import { Loader2 } from 'lucide-react';
 import { createRepository, requestPersistentStorage } from '@job/storage';
 import { setRepository } from '@job/storage/current';
 import { hydrate, startAutosave } from '@job/store/persistence';
+import { syncWithCloud, startCloudPush } from '@job/storage/cloud';
 import { router } from '@job/routes';
 
 type Boot = { phase: 'loading' } | { phase: 'ready' } | { phase: 'error'; message: string };
@@ -15,6 +16,7 @@ export default function App() {
 
   useEffect(() => {
     let stopAutosave: (() => void) | undefined;
+    let stopCloudPush: (() => void) | undefined;
     let cancelled = false;
 
     void (async () => {
@@ -24,9 +26,19 @@ export default function App() {
         await hydrate(repo);
         if (cancelled) return;
 
+        // 폰↔PC 동기화: 클라우드와 병합(어느 기기 데이터도 잃지 않음).
+        // 실패해도(테이블·네트워크·환경변수 문제) 조용히 로컬로 계속 동작한다.
+        try {
+          await syncWithCloud(repo);
+        } catch {
+          /* 클라우드 문제로 앱 시작이 막히면 안 된다 */
+        }
+        if (cancelled) return;
+
         // 브라우저의 자동 삭제 대상에서 제외해 달라고 요청한다.
         void requestPersistentStorage();
         stopAutosave = startAutosave(repo);
+        stopCloudPush = startCloudPush();
         setBoot({ phase: 'ready' });
       } catch (e) {
         if (!cancelled) {
@@ -38,6 +50,7 @@ export default function App() {
     return () => {
       cancelled = true;
       stopAutosave?.();
+      stopCloudPush?.();
     };
   }, []);
 

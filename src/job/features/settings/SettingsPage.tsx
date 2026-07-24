@@ -396,7 +396,8 @@ export function SettingsPage() {
         <ul className="space-y-1.5 text-xs leading-relaxed text-slate-700">
           <li className="flex gap-1.5">
             <ShieldAlert size={13} className="mt-px shrink-0 text-slate-500" />
-            데이터는 서버로 전송되지 않고 이 브라우저에만 저장됩니다. 로그인도 없습니다.
+            데이터는 이 브라우저에 저장되고, 폰·PC에서 함께 보이도록 클라우드(Supabase)에도
+            동기화됩니다. 로그인은 없습니다.
           </li>
           <li className="flex gap-1.5">
             <ShieldAlert size={13} className="mt-px shrink-0 text-slate-500" />
