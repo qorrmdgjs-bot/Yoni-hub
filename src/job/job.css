@@ -1,0 +1,45 @@
+/*
+ * Job Finder를 diet-daily 포털 안에 마운트할 때의 스코프 스타일.
+ *
+ * diet-daily는 body 전역에 손글씨 폰트를, html에 18px를 적용하는데
+ * 정보 밀집 화면인 Job Finder에는 맞지 않는다. 여기서 되돌린다.
+ * 원본 job_finder/src/index.css의 커스텀 규칙을 .jobfinder-root 하위로 스코프한 것.
+ */
+
+/* Job Finder 화면이 떠 있는 동안에만 루트 폰트 크기를 16px로 되돌린다.
+   :has()라서 다른 라우트(다이어트·수면)로 나가면 자동으로 18px로 복귀한다. */
+html:has(.jobfinder-root) {
+  font-size: 16px;
+}
+
+.jobfinder-root {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background-color: #f1f5f9; /* slate-100 */
+  color: #0f172a; /* slate-900 */
+  font-family:
+    'Pretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Segoe UI',
+    'Malgun Gothic', 'Noto Sans KR', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* 칸반 가로 스크롤바를 얇게 */
+.jobfinder-root .thin-scroll::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.jobfinder-root .thin-scroll::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1; /* slate-300 */
+  border-radius: 9999px;
+}
+.jobfinder-root .thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 하단 탭바가 홈 인디케이터에 가리지 않게 */
+.jobfinder-root .safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

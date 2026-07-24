@@ -27,6 +27,15 @@ export default function Home() {
             <p className="text-xl font-bold text-indigo-700">Well-Sleep</p>
             <p className="text-sm text-indigo-400 mt-1">매일 수면시간을 기록하고 평균을 확인해요</p>
           </Link>
+
+          <Link
+            href="/job"
+            className="block rounded-2xl p-6 bg-emerald-50 border border-emerald-100 shadow-md hover:bg-emerald-100"
+          >
+            <div className="text-5xl mb-2">💼</div>
+            <p className="text-xl font-bold text-emerald-700">Job Finder</p>
+            <p className="text-sm text-emerald-500 mt-1">이직 지원 현황을 한 곳에서 관리해요</p>
+          </Link>
         </div>
       </div>
     </div>
