@@ -102,6 +102,17 @@ const DEBOUNCE_MS = 600;
 /** 연속 입력 중에도 이 간격마다는 강제로 저장한다 */
 const MAX_WAIT_MS = 3000;
 
+/**
+ * 수동 "저장" 버튼용. startAutosave가 켜져 있는 동안 현재 스냅샷을 즉시 저장하는
+ * 함수를 여기에 등록해 두고, UI는 이 saveNow()만 호출한다.
+ * (자동저장이 이미 돌지만, 사용자가 직접 저장하고 "저장됨"을 확인하고 싶을 때를 위한 것.)
+ */
+let registeredSaveNow: (() => Promise<void>) | null = null;
+
+export function saveNow(): Promise<void> {
+  return registeredSaveNow ? registeredSaveNow() : Promise.resolve();
+}
+
 export function startAutosave(repo: StorageRepository): () => void {
   const dirty = new Set<CollectionKey>();
   let debounceTimer: number | undefined;
@@ -151,6 +162,35 @@ export function startAutosave(repo: StorageRepository): () => void {
     }
   };
 
+  /**
+   * 수동 저장 — dirty 추적과 무관하게 전체 스냅샷을 통째로 쓴다.
+   * "혹시 안 저장됐을까" 걱정 없이 한 번에 확실히 저장되도록.
+   */
+  const saveAllNow = async () => {
+    clearTimers();
+    if (writing) return;
+    writing = true;
+    dirty.clear();
+
+    const { data, _setSaveState } = useAppStore.getState();
+    const patch: Partial<AppData> = {};
+    for (const key of COLLECTION_KEYS) {
+      (patch as Record<string, unknown>)[key] = data[key];
+    }
+
+    _setSaveState('saving');
+    try {
+      await repo.writeCollections(patch, { schemaVersion: SCHEMA_VERSION, updatedAt: nowISO() });
+      _setSaveState('saved');
+    } catch (error) {
+      COLLECTION_KEYS.forEach((k) => dirty.add(k));
+      _setSaveState('error', classifyStorageError(error));
+    } finally {
+      writing = false;
+    }
+  };
+  registeredSaveNow = saveAllNow;
+
   const unsubscribe = useAppStore.subscribe((state, prev) => {
     if (state.status !== 'ready') return;
     if (state.data === prev.data) return;
@@ -173,6 +213,7 @@ export function startAutosave(repo: StorageRepository): () => void {
   return () => {
     clearTimers();
     unsubscribe();
+    if (registeredSaveNow === saveAllNow) registeredSaveNow = null;
     document.removeEventListener('visibilitychange', onHide);
     window.removeEventListener('pagehide', onPageHide);
   };

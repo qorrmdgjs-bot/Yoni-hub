@@ -7,16 +7,44 @@ import {
   Compass,
   Download,
   Home,
+  LayoutGrid,
   ListChecks,
   Loader2,
   MessageSquareText,
+  Save,
   Settings as SettingsIcon,
 } from 'lucide-react';
 import { cn } from '@job/lib/cn';
 import { useAppStore } from '@job/store';
 import { downloadText } from '@job/lib/download';
+import { saveNow } from '@job/store/persistence';
 import { exportFilename, serializeExport } from '@job/storage/importExport';
 import { Button } from '@job/components/ui';
+
+/**
+ * 포털(diet-daily) 안의 /job 으로 열렸는지 판정.
+ * 이때만 "앱 선택으로 나가기" 버튼을 보여준다.
+ * 독립 실행(job_finder 단독)에서는 경로가 '/'라 이 버튼이 뜨지 않는다.
+ */
+function useInPortal(): boolean {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/job');
+}
+
+/** 수동 저장 버튼 — 평소에도 자동 저장되지만, 직접 저장하고 확인하고 싶을 때. */
+function SaveButton() {
+  const saveState = useAppStore((s) => s.saveState);
+  return (
+    <Button
+      size="sm"
+      variant="primary"
+      onClick={() => void saveNow()}
+      disabled={saveState === 'saving'}
+      title="지금 저장합니다 (입력하면 평소에도 자동으로 저장됩니다)"
+    >
+      <Save size={13} /> 저장
+    </Button>
+  );
+}
 
 /**
  * 순서 = 실제 이직 진행 순서.
@@ -125,6 +153,7 @@ function StorageBanner() {
 
 export function AppShell() {
   const markExported = useAppStore((s) => s.markExported);
+  const inPortal = useInPortal();
 
   const quickExport = () => {
     downloadText(exportFilename(), serializeExport(useAppStore.getState().data));
@@ -138,6 +167,14 @@ export function AppShell() {
       <div className="flex flex-1">
         {/* 데스크톱 사이드바 */}
         <aside className="hidden w-52 shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
+          {inPortal && (
+            <a
+              href="/"
+              className="flex items-center gap-2 border-b border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100"
+            >
+              <LayoutGrid size={15} /> 앱 선택으로 나가기
+            </a>
+          )}
           <div className="px-4 py-5">
             <p className="text-sm font-bold text-slate-900">이직 파트너</p>
             <p className="mt-0.5 text-[11px] text-slate-500">경영지원 경력직 이직 관리</p>
@@ -170,9 +207,23 @@ export function AppShell() {
 
         {/* 본문 */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 md:justify-end">
-            <span className="text-sm font-bold text-slate-900 md:hidden">이직 파트너</span>
-            <SaveIndicator />
+          <header className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-4">
+            <div className="flex items-center gap-2">
+              {inPortal && (
+                <a
+                  href="/"
+                  aria-label="앱 선택으로 나가기"
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-100 md:hidden"
+                >
+                  <LayoutGrid size={16} /> 앱
+                </a>
+              )}
+              <span className="text-sm font-bold text-slate-900 md:hidden">이직 파트너</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <SaveIndicator />
+              <SaveButton />
+            </div>
           </header>
 
           <main className="min-w-0 flex-1 pb-20 md:pb-0">
