@@ -47,6 +47,18 @@ export function addSleepEntry(entry: SleepEntry): void {
   syncEntryToSupabase(entry);
 }
 
+export function deleteSleepEntry(date: string): void {
+  const data = loadSleepData();
+  const nextEntries = data.entries.filter(e => e.date !== date);
+  // 삭제할 항목이 없으면 아무 것도 하지 않음
+  if (nextEntries.length === data.entries.length) return;
+  data.entries = nextEntries;
+  saveSleepData(data);
+
+  // Supabase에서도 삭제
+  syncDeleteFromSupabase(date);
+}
+
 export function updateSleepSettings(settings: Partial<SleepSettings>): void {
   const data = loadSleepData();
   data.settings = { ...data.settings, ...settings };
@@ -71,6 +83,14 @@ async function syncEntryToSupabase(entry: SleepEntry) {
         },
         { onConflict: 'date' }
       );
+  } catch {
+    // 네트워크 오류 시 로컬만 유지
+  }
+}
+
+async function syncDeleteFromSupabase(date: string) {
+  try {
+    await supabase.from('sleep_entries').delete().eq('date', date);
   } catch {
     // 네트워크 오류 시 로컬만 유지
   }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { format, getDaysInMonth } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { loadSleepData, addSleepEntry } from '@/utils/sleepStorage';
+import { loadSleepData, addSleepEntry, deleteSleepEntry } from '@/utils/sleepStorage';
 import { SleepEntry } from '@/types';
 
 interface PastSleepInputProps {
@@ -57,18 +57,33 @@ export default function PastSleepInput({ onSave }: PastSleepInputProps) {
   };
 
   const handleSave = () => {
+    const data = loadSleepData();
+    const existingDates = new Set(data.entries.map(e => e.date));
+
     for (let d = 1; d <= daysInMonth; d++) {
       const value = days[d];
-      if (value == null || value === '') continue;
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+      if (value == null || value === '') {
+        // 값을 비우고 저장하면 기존 기록을 삭제
+        if (existingDates.has(dateStr)) deleteSleepEntry(dateStr);
+        continue;
+      }
+
       const hours = parseFloat(value);
       if (Number.isNaN(hours)) continue;
 
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const entry: SleepEntry = { date: dateStr, hours };
       addSleepEntry(entry);
     }
     setSaved(true);
     onSave();
+  };
+
+  const handleDelete = (day: number) => {
+    handleChange(day, '');
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    deleteSleepEntry(dateStr);
   };
 
   const getDayOfWeek = (day: number) => {
@@ -102,17 +117,20 @@ export default function PastSleepInput({ onSave }: PastSleepInputProps) {
       </div>
 
       {/* 테이블 헤더 */}
-      <div className="grid grid-cols-[80px_1fr] gap-1 mb-2 text-center text-xs sm:text-sm font-semibold text-indigo-500">
+      <div className="grid grid-cols-[80px_1fr_36px] gap-1 mb-2 text-center text-xs sm:text-sm font-semibold text-indigo-500">
         <div>날짜</div>
         <div>수면시간 (시간)</div>
+        <div></div>
       </div>
 
       {/* 일별 입력 */}
       <div className="space-y-1 max-h-[400px] overflow-y-auto">
-        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => (
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
+          const hasValue = days[day] != null && days[day] !== '';
+          return (
           <div
             key={day}
-            className={`grid grid-cols-[80px_1fr] gap-1 items-center ${
+            className={`grid grid-cols-[80px_1fr_36px] gap-1 items-center ${
               isWeekend(day) ? 'bg-indigo-50' : ''
             } rounded px-1 py-0.5`}
           >
@@ -131,8 +149,19 @@ export default function PastSleepInput({ onSave }: PastSleepInputProps) {
               onChange={e => handleChange(day, e.target.value)}
               className="w-full px-2 py-1.5 text-sm text-center border border-indigo-200 rounded-lg bg-white text-indigo-700 focus:ring-2 focus:ring-indigo-300 focus:outline-none"
             />
+            <button
+              type="button"
+              onClick={() => handleDelete(day)}
+              disabled={!hasValue}
+              aria-label={`${day}일 기록 삭제`}
+              title="이 날짜 기록 삭제"
+              className="text-sm text-rose-400 hover:text-rose-600 disabled:text-gray-200 disabled:cursor-not-allowed"
+            >
+              🗑
+            </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* 저장 버튼 */}
