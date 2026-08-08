@@ -10,31 +10,32 @@ export default function Home() {
         <p className="text-gray-400 mb-8">매일의 나를 기록해요 ✨</p>
 
         <div className="space-y-4">
-          <Link
-            href="/dashboard"
-            className="block rounded-2xl p-6 bg-pink-50 border border-pink-100 shadow-md hover:bg-pink-100"
-          >
+          <Link href="/dashboard"
+            className="block rounded-2xl p-6 bg-pink-50 border border-pink-100 shadow-md hover:bg-pink-100">
             <div className="text-5xl mb-2">🦄</div>
             <p className="text-xl font-bold text-pink-700">Diet Daily</p>
             <p className="text-sm text-pink-400 mt-1">매일 체중을 기록하고 추이를 확인해요</p>
           </Link>
 
-          <Link
-            href="/sleep"
-            className="block rounded-2xl p-6 bg-indigo-50 border border-indigo-100 shadow-md hover:bg-indigo-100"
-          >
+          <Link href="/sleep"
+            className="block rounded-2xl p-6 bg-indigo-50 border border-indigo-100 shadow-md hover:bg-indigo-100">
             <div className="text-5xl mb-2">🌙</div>
             <p className="text-xl font-bold text-indigo-700">Well-Sleep</p>
             <p className="text-sm text-indigo-400 mt-1">매일 수면시간을 기록하고 평균을 확인해요</p>
           </Link>
 
-          <Link
-            href="/job"
-            className="block rounded-2xl p-6 bg-emerald-50 border border-emerald-100 shadow-md hover:bg-emerald-100"
-          >
+          <Link href="/job"
+            className="block rounded-2xl p-6 bg-emerald-50 border border-emerald-100 shadow-md hover:bg-emerald-100">
             <div className="text-5xl mb-2">💼</div>
             <p className="text-xl font-bold text-emerald-700">Job Finder</p>
             <p className="text-sm text-emerald-500 mt-1">이직 지원 현황을 한 곳에서 관리해요</p>
+          </Link>
+
+          <Link href="/cgv"
+            className="block rounded-2xl p-6 bg-amber-50 border border-amber-100 shadow-md hover:bg-amber-100">
+            <div className="text-5xl mb-2">🎬</div>
+            <p className="text-xl font-bold text-amber-700">CGV IMAX</p>
+            <p className="text-sm text-amber-500 mt-1">오디세이 IMAX 새 날짜를 알려드려요</p>
           </Link>
         </div>
       </div>
