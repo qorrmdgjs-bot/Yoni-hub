@@ -16,9 +16,10 @@ interface ExistingRow {
 }
 
 export async function GET(request: NextRequest) {
+  const isManual = request.nextUrl.searchParams.get('manual') === 'true';
   const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!isManual && cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -26,12 +27,16 @@ export async function GET(request: NextRequest) {
     const screenings = await checkAllDates(SITE_NO, 14);
 
     if (screenings.length === 0) {
-      return NextResponse.json({ checked: 14, found: 0, newDates: 0, seatsAlerts: 0 });
+      return NextResponse.json({ checked: 14, found: 0, newDates: 0, seatsAlerts: 0, seatsReset: 0 });
     }
 
-    const { data: existing } = await supabase
+    const { data: existing, error: fetchErr } = await supabase
       .from('cgv_screenings')
       .select('screening_date, start_time, screen_name, free_seats, notified_8seats');
+
+    if (fetchErr) {
+      return NextResponse.json({ error: 'DB fetch failed', detail: fetchErr.message }, { status: 500 });
+    }
 
     const existingMap = new Map<string, ExistingRow>();
     for (const r of (existing ?? []) as ExistingRow[]) {
@@ -59,7 +64,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (newScreenings.length > 0) {
-      await supabase.from('cgv_screenings').upsert(
+      const { error: upsertErr } = await supabase.from('cgv_screenings').upsert(
         newScreenings.map((s) => ({
           screening_date: s.date,
           start_time: s.startTime,
@@ -73,14 +78,16 @@ export async function GET(request: NextRequest) {
         { onConflict: 'screening_date,start_time,screen_name' }
       );
 
-      const lines = newScreenings.map(
-        (s) => `${formatDateKo(s.date)} ${formatTime(s.startTime)} ${s.screenName} (${s.freeSeats}석)`
-      );
-      await sendNtfy(
-        `🎬 오디세이 IMAX 새 날짜 ${newScreenings.length}건!`,
-        `${SITE_NAME}\n\n${lines.join('\n')}\n\nhttps://cgv.co.kr/cnm/movieBook/movie`,
-        5
-      );
+      if (!upsertErr) {
+        const lines = newScreenings.map(
+          (s) => `${formatDateKo(s.date)} ${formatTime(s.startTime)} ${s.screenName} (${s.freeSeats}석)`
+        );
+        await sendNtfy(
+          `🎬 오디세이 IMAX 새 날짜 ${newScreenings.length}건!`,
+          `${SITE_NAME}\n\n${lines.join('\n')}\n\nhttps://cgv.co.kr/cnm/movieBook/movie`,
+          5
+        );
+      }
     }
 
     if (seatsAvailable.length > 0) {
@@ -120,13 +127,15 @@ export async function GET(request: NextRequest) {
     const others = screenings.filter(
       (s) => !handledKeys.has(`${s.date}_${s.startTime}_${s.screenName}`) && existingMap.has(`${s.date}_${s.startTime}_${s.screenName}`)
     );
-    for (const s of others) {
-      await supabase
-        .from('cgv_screenings')
-        .update({ free_seats: s.freeSeats, total_seats: s.totalSeats })
-        .eq('screening_date', s.date)
-        .eq('start_time', s.startTime)
-        .eq('screen_name', s.screenName);
+    if (others.length > 0) {
+      await Promise.all(others.map((s) =>
+        supabase
+          .from('cgv_screenings')
+          .update({ free_seats: s.freeSeats, total_seats: s.totalSeats })
+          .eq('screening_date', s.date)
+          .eq('start_time', s.startTime)
+          .eq('screen_name', s.screenName)
+      ));
     }
 
     return NextResponse.json({
