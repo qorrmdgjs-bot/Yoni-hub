@@ -6,11 +6,9 @@ export async function sendNtfy(title: string, message: string, priority: number 
     const res = await fetch(NTFY_URL, {
       method: 'POST',
       headers: {
-        'Title': title,
-        'Priority': String(priority),
-        'Tags': 'movie_camera,ticket',
+        'Content-Type': 'text/plain; charset=utf-8',
       },
-      body: message,
+      body: `${title}\n\n${message}`,
     });
     return res.ok;
   } catch {
