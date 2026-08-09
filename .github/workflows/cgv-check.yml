@@ -1,0 +1,19 @@
+name: CGV IMAX 오디세이 체크
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CGV API 체크
+        run: |
+          curl -s -X GET "https://diet-daily.vercel.app/api/cron/cgv-check" \
+            -H "Accept: application/json" \
+            -o response.json
+          cat response.json
+          echo ""
+          echo "✅ 체크 완료"
