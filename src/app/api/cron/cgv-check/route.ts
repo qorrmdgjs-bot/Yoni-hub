@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const screenings = await checkAllDates(SITE_NO, 14);
+    const screenings = await checkAllDates(SITE_NO, 30);
 
     if (screenings.length === 0) {
       return NextResponse.json({ checked: 14, found: 0, newDates: 0, seatsAlerts: 0, seatsReset: 0 });
