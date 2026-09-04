@@ -1,109 +1,130 @@
 import type { JobPosting, SiteAdapterResult } from './types';
 
 /**
- * 사람인 공식 Open API(job-search). 4개 채용사이트 중 유일하게 정식 계약된 소스.
+ * 사람인 비공식 스크래핑. 원래 공식 Open API(access-key 발급, 승인 대기)로 만들었으나,
+ * 로그인 없이 열리는 일반 검색 페이지(zf_user/search)에서 원티드·잡코리아와 똑같은
+ * 방식으로 데이터를 뽑을 수 있는 게 확인돼(2026-09) 승인 대기 없이 바로 쓰는 쪽으로
+ * 바꿨다 — 4개 사이트 전부 비공식이 되어 리스크 성격은 통일됐지만 승인 대기가 없어졌다.
  *
- * access-key는 https://oapi.saramin.co.kr 에서 "이용신청" 승인을 받은 뒤
- * [Application] > [앱 등록]으로 발급받아 SARAMIN_ACCESS_KEY 환경변수에 넣는다.
- * 일일 500회 한도(초과 시 에러코드 4) — 그래서 키워드를 한 번에 묶어(회계,경영지원)
- * 사이클당 1회만 호출한다.
- *
- * 코드값은 공식 코드표에서 확인함(2026-09 기준):
- * loc_cd 101010=강남구, 101150=서초구 / job_type 1=정규직.
- *
- * 응답은 XML로 받아 정규식으로 필드를 뽑는다(공식 문서가 JSON 응답의 정확한 키
- * 표기를 예시로 보여주지 않아, XML 문서에 명시된 엘리먼트명을 그대로 신뢰하는 쪽이
- * 더 안전하다). 사이트가 API를 바꾸면 이 정규식들이 깨질 수 있다.
+ * GET https://www.saramin.co.kr/zf_user/search?searchType=search&searchword=<키워드>&loc_cd=<코드>
+ * - loc_cd는 실검증으로 서버에서 실제로 필터링됨을 확인(101010=강남구, 101150=서초구,
+ *   공식 API 코드표와 동일). job_type(고용형태) 파라미터는 이 엔드포인트에서 무시되는
+ *   것으로 확인돼 고용형태는 카드 텍스트를 읽어 클라이언트에서 판단한다.
+ * - 결과 카드(`item_recruit`)는 구식 서버렌더 HTML이라 class명이 안정적이라 정규식
+ *   추출이 잡코리아보다 오히려 쉽다. 다만 사람인이 마크업을 바꾸면 깨질 수 있는 건
+ *   원티드·잡코리아와 동일한 리스크다.
  */
 
+const KEYWORDS = ['회계', '경영지원'];
 const LOC_CODES = ['101010', '101150']; // 강남구, 서초구
-const JOB_TYPE_REGULAR_CODE = '1';
+const HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+};
 
 export async function fetchPostings(): Promise<SiteAdapterResult> {
-  const accessKey = process.env.SARAMIN_ACCESS_KEY;
-  if (!accessKey) {
-    // 키 미발급 상태 — 사람이 개입해야 하므로 인증 실패로 취급
-    return { postings: [], authFailed: true };
+  const byId = new Map<string, JobPosting>();
+
+  for (const kw of KEYWORDS) {
+    const url =
+      `https://www.saramin.co.kr/zf_user/search?searchType=search&searchword=${encodeURIComponent(kw)}` +
+      `&loc_cd=${LOC_CODES.join(',')}`;
+    const res = await fetch(url, { headers: HEADERS });
+    if (!res.ok) throw new Error(`saramin http ${res.status}`);
+    const html = await res.text();
+
+    for (const posting of extractCards(html)) {
+      byId.set(posting.externalId, posting);
+    }
   }
 
-  const params = new URLSearchParams({
-    'access-key': accessKey,
-    keywords: '회계,경영지원',
-    loc_cd: LOC_CODES.join(','),
-    job_type: JOB_TYPE_REGULAR_CODE,
-    count: '110',
-    sort: 'pd',
-  });
+  return { postings: [...byId.values()] };
+}
 
-  const res = await fetch(`https://oapi.saramin.co.kr/job-search?${params.toString()}`, {
-    headers: { Accept: 'application/xml' },
-  });
-  if (!res.ok) throw new Error(`saramin http ${res.status}`);
-  const xml = await res.text();
-
-  const resultCode = matchOne(xml, /<result>\s*<code>(\d+)<\/code>/);
-  if (resultCode === '2') {
-    return { postings: [], authFailed: true }; // 유효하지 않은 access-key
-  }
-  if (resultCode) {
-    const message = matchOne(xml, /<message>([^<]*)<\/message>/) ?? '';
-    throw new Error(`saramin error code ${resultCode}: ${message}`);
+function extractCards(html: string): JobPosting[] {
+  const postings: JobPosting[] = [];
+  const startRe = /<div class="item_recruit"\s+value="(\d+)"/g;
+  const starts: { id: string; index: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = startRe.exec(html))) {
+    starts.push({ id: m[1], index: m.index });
   }
 
-  const jobBlocks = xml.match(/<job>[\s\S]*?<\/job>/g) ?? [];
-  const postings: JobPosting[] = jobBlocks.map(parseJobBlock).filter((p): p is JobPosting => p !== null);
+  for (let i = 0; i < starts.length; i++) {
+    const { id, index } = starts[i];
+    const end = i + 1 < starts.length ? starts[i + 1].index : Math.min(html.length, index + 6000);
+    const block = html.slice(index, end);
 
-  return { postings };
+    const titleMatch = block.match(/<h2 class="job_tit">[\s\S]*?<span>([\s\S]*?)<\/span>/);
+    const title = titleMatch ? stripTags(titleMatch[1]) : '';
+
+    const companyMatch = block.match(/<strong class="corp_name">\s*<a[^>]*>\s*([^<]+?)\s*<\/a>/);
+    const company = companyMatch?.[1]?.trim() ?? '';
+
+    const conditionMatch = block.match(/<div class="job_condition">([\s\S]*?)<\/div>/);
+    const conditionText = conditionMatch
+      ? conditionMatch[1]
+          .replace(/<a[^>]*>/g, '')
+          .replace(/<\/a>/g, '|')
+          .replace(/<[^>]+>/g, '')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : '';
+
+    const parts = conditionText.split('|').map((s) => s.trim());
+    const locationText = parts.slice(0, -1).filter(Boolean).join(' ');
+    const trailingText = parts[parts.length - 1] ?? '';
+
+    const { careerMin, careerMax, careerText } = parseCareer(trailingText);
+    const isRegular = trailingText.includes('정규직')
+      ? true
+      : /계약직|인턴직|파견직|아르바이트|프리랜서/.test(trailingText)
+        ? false
+        : null;
+
+    if (!title || !company) continue;
+
+    postings.push({
+      sourceSite: 'saramin',
+      externalId: id,
+      title,
+      company,
+      location: locationText || null,
+      employmentType: trailingText || null,
+      isRegular,
+      careerMin,
+      careerMax,
+      careerText,
+      jdText: null,
+      perkHints: [],
+      url: `https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=${id}`,
+      postedAt: null,
+    });
+  }
+
+  return postings;
 }
 
-function parseJobBlock(block: string): JobPosting | null {
-  const id = matchOne(block, /<id>(\d+)<\/id>/);
-  const url = matchOne(block, /<url>\s*([^<]*?)\s*<\/url>/);
-  if (!id || !url) return null;
-
-  const postingTs = Number(matchOne(block, /<posting-timestamp>(\d+)<\/posting-timestamp>/));
-  const title = matchCdata(block, 'title');
-  const companyName = matchCdata(block, 'name');
-  const locationText = matchCdata(block, 'location');
-
-  const jobTypeMatch = block.match(/<job-type code="(\d+)">([^<]*)<\/job-type>/);
-  const jobTypeCode = jobTypeMatch?.[1] ?? null;
-  const jobTypeText = jobTypeMatch?.[2]?.trim() ?? null;
-
-  const expMatch = block.match(
-    /<experience-level code="(\d+)"(?:\s+min="(\d+)")?(?:\s+max="(\d+)")?>([^<]*)<\/experience-level>/,
-  );
-  const expCode = expMatch?.[1];
-  const careerMin = expMatch?.[2] ? Number(expMatch[2]) : expCode === '0' || expCode === '1' ? 0 : null;
-  const careerMax = expMatch?.[3] ? Number(expMatch[3]) : null;
-  const careerText = expMatch?.[4]?.trim() ?? null;
-
-  const keyword = matchOne(block, /<keyword>\s*([^<]*?)\s*<\/keyword>/);
-
-  return {
-    sourceSite: 'saramin',
-    externalId: id,
-    title: title ?? '',
-    company: companyName ?? '',
-    location: locationText,
-    employmentType: jobTypeText,
-    isRegular: jobTypeCode ? jobTypeCode === JOB_TYPE_REGULAR_CODE : null,
-    careerMin,
-    careerMax,
-    careerText,
-    jdText: keyword,
-    perkHints: [],
-    url,
-    postedAt: Number.isFinite(postingTs) && postingTs > 0 ? new Date(postingTs * 1000).toISOString() : null,
-  };
+function stripTags(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
-function matchOne(text: string, re: RegExp): string | null {
-  return text.match(re)?.[1]?.trim() ?? null;
-}
+function parseCareer(text: string): { careerMin: number | null; careerMax: number | null; careerText: string | null } {
+  if (text.includes('경력무관')) return { careerMin: null, careerMax: null, careerText: '경력무관' };
 
-/** <tag><![CDATA[ 값 ]]></tag> 또는 <tag>값</tag> 둘 다 처리 */
-function matchCdata(text: string, tag: string): string | null {
-  const re = new RegExp(`<${tag}[^>]*>\\s*(?:<!\\[CDATA\\[)?\\s*([^\\]<]*?)\\s*(?:\\]\\]>)?\\s*<\\/${tag}>`);
-  return text.match(re)?.[1]?.trim() ?? null;
+  const range = text.match(/경력\s*(\d+)\s*~\s*(\d+)\s*년/);
+  if (range) return { careerMin: Number(range[1]), careerMax: Number(range[2]), careerText: range[0] };
+
+  const atLeast = text.match(/경력\s*(\d+)\s*년\s*↑/);
+  if (atLeast) return { careerMin: Number(atLeast[1]), careerMax: null, careerText: atLeast[0] };
+
+  if (text.includes('신입·경력') || text.includes('신입/경력')) {
+    return { careerMin: null, careerMax: null, careerText: '신입·경력' };
+  }
+  if (text.includes('신입')) return { careerMin: 0, careerMax: 0, careerText: '신입' };
+
+  return { careerMin: null, careerMax: null, careerText: null };
 }

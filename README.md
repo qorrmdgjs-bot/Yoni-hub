@@ -32,8 +32,9 @@
 - **Next.js 16** (App Router) · **React 19** · TypeScript · **Tailwind CSS v4**
 - recharts(차트) · date-fns(날짜) · next-themes(다크모드)
 - Supabase + Anthropic SDK — AI 분석 기능 전용
-- **Job Finder**는 사람인 공식 Open API + 원티드·잡코리아·리멤버 비공식 API를 주기적으로
-  조회해 조건에 맞는 새 공고를 Supabase에 기록하고 ntfy로 알린다(`src/job/`, `/job`).
+- **Job Finder**는 사람인·원티드·잡코리아(비공식, 로그인 불필요) + 잡플래닛(회사 평점)을
+  주기적으로 조회해 조건에 맞는 새 공고를 Supabase에 기록하고 ntfy로 알린다(`src/job/`,
+  `/job`). 리멤버는 로그인 세션이 필요해 아직 스켈레톤 상태.
 
 ## 폴더 구조
 
@@ -70,11 +71,12 @@ ANTHROPIC_API_KEY=...
 ```
 
 Job Finder(채용공고 알림)를 로컬에서 완전히 돌리려면 위 Supabase 값에 더해
-[`supabase/job-alert-schema.sql`](./supabase/job-alert-schema.sql)을 대시보드에서 먼저 실행하고,
-아래 환경변수가 필요합니다(없으면 해당 사이트는 "인증 실패"로 표시되고 나머지는 그대로 동작합니다):
+[`supabase/job-alert-schema.sql`](./supabase/job-alert-schema.sql)을 대시보드에서 먼저 실행해야 한다.
+사람인·원티드·잡코리아는 로그인·API 키 없이 바로 동작한다. 리멤버는 로그인 세션이
+있어야 조회 가능해 아직 미완성이며(`src/job/sites/remember.ts` 참고), 완성 전까지는
+아래 환경변수가 없어 "인증 실패"로만 표시되고 나머지 3개 사이트는 그대로 동작한다:
 
 ```
-SARAMIN_ACCESS_KEY=...        # oapi.saramin.co.kr 이용신청 승인 후 발급
 REMEMBER_SESSION_COOKIE=...   # 리멤버 로그인 후 DevTools로 캡처한 세션 쿠키
 ```
 
