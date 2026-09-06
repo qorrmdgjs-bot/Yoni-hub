@@ -28,7 +28,7 @@ export default function Home() {
             className="block rounded-2xl p-6 bg-emerald-50 border border-emerald-100 shadow-md hover:bg-emerald-100">
             <div className="text-5xl mb-2">💼</div>
             <p className="text-xl font-bold text-emerald-700">Job Finder</p>
-            <p className="text-sm text-emerald-500 mt-1">이직 지원 현황을 한 곳에서 관리해요</p>
+            <p className="text-sm text-emerald-500 mt-1">조건에 맞는 채용공고가 뜨면 알려드려요</p>
           </Link>
 
           <Link href="/cgv"
