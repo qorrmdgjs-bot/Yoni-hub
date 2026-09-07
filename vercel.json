@@ -1,10 +1,6 @@
 {
   "crons": [
     {
-      "path": "/api/cron/cgv-check",
-      "schedule": "0 9 * * *"
-    },
-    {
       "path": "/api/cron/job-check",
       "schedule": "0 9 * * *"
     }

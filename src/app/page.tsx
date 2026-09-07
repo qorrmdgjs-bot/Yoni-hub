@@ -30,13 +30,6 @@ export default function Home() {
             <p className="text-xl font-bold text-emerald-700">Job Finder</p>
             <p className="text-sm text-emerald-500 mt-1">조건에 맞는 채용공고가 뜨면 알려드려요</p>
           </Link>
-
-          <Link href="/cgv"
-            className="block rounded-2xl p-6 bg-amber-50 border border-amber-100 shadow-md hover:bg-amber-100">
-            <div className="text-5xl mb-2">🎬</div>
-            <p className="text-xl font-bold text-amber-700">CGV IMAX</p>
-            <p className="text-sm text-amber-500 mt-1">오디세이 IMAX 새 날짜를 알려드려요</p>
-          </Link>
         </div>
       </div>
     </div>

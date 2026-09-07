@@ -25,7 +25,7 @@
   - → **PC와 휴대폰의 데이터는 자동으로 동기화되지 않습니다.** 브라우저 데이터를 지우면 사라지므로 백업(내보내기)이 중요합니다.
   - → 접속 **주소가 바뀌면** 브라우저 저장 데이터는 새 주소에서 보이지 않습니다(그래서 URL은 그대로 둡니다).
 - **AI 분석 기능**(다이어트·수면의 `/analysis`)과 **Job Finder(채용공고 알림)**는 서버를 씁니다 —
-  Supabase + Anthropic API, GitHub Actions 30분 자동 체크 + ntfy 푸시(CGV IMAX 모니터와 같은 구조).
+  Supabase + Anthropic API, GitHub Actions 자동 체크(하루 2번, 오전 11시·오후 3시) + ntfy 푸시.
 
 ## 기술 스택
 
@@ -44,13 +44,13 @@ src/
 │  ├─ page.tsx           #   랜딩(앱 3개 선택 카드)
 │  ├─ dashboard, input, graph, analysis, settings …   # Diet Daily
 │  ├─ sleep/…            #   Well-Sleep
-│  ├─ api/…              #   AI 분석 API, 채용공고/CGV 크론 (Supabase·Anthropic)
+│  ├─ api/…              #   AI 분석 API, 채용공고 크론 (Supabase·Anthropic)
 │  └─ job/page.tsx       #   Job Finder 알림 화면
 ├─ job/                  # Job Finder 소스
 │  ├─ sites/             #   사이트별 어댑터(사람인·원티드·잡코리아·리멤버·잡플래닛)
 │  ├─ criteria.ts         #   필터 기준 + "내가 다니고 싶은 회사" 참고 문구
 │  └─ lib/company.ts     #   회사명 정규화(잡플래닛 캐시 키)
-├─ lib, utils, components, constants, types   # 다이어트·수면·CGV·Job Finder 공용
+├─ lib, utils, components, constants, types   # 다이어트·수면·Job Finder 공용
 ```
 
 ## 개발

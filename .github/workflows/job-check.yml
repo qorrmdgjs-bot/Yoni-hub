@@ -1,0 +1,20 @@
+name: 채용공고 알림 체크
+
+on:
+  schedule:
+    # 하루 2번: 한국시간(KST, UTC+9) 오전 11시 · 오후 3시 = UTC 02:00 · 06:00
+    - cron: '0 2,6 * * *'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 채용공고 체크
+        run: |
+          curl -s -X GET "https://diet-daily.vercel.app/api/cron/job-check" \
+            -H "Accept: application/json" \
+            -o response.json
+          cat response.json
+          echo ""
+          echo "✅ 채용공고 체크 완료"
