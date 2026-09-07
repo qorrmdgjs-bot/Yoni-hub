@@ -32,9 +32,9 @@
 - **Next.js 16** (App Router) · **React 19** · TypeScript · **Tailwind CSS v4**
 - recharts(차트) · date-fns(날짜) · next-themes(다크모드)
 - Supabase + Anthropic SDK — AI 분석 기능 전용
-- **Job Finder**는 사람인·원티드·잡코리아(비공식, 로그인 불필요) + 잡플래닛(회사 평점)을
+- **Job Finder**는 사람인·원티드·잡코리아·리멤버(전부 비공식 API) + 잡플래닛(회사 평점)을
   주기적으로 조회해 조건에 맞는 새 공고를 Supabase에 기록하고 ntfy로 알린다(`src/job/`,
-  `/job`). 리멤버는 로그인 세션이 필요해 아직 스켈레톤 상태.
+  `/job`). 리멤버만 로그인 토큰이 필요하고 나머지는 로그인 없이 동작한다.
 
 ## 폴더 구조
 
@@ -72,12 +72,13 @@ ANTHROPIC_API_KEY=...
 
 Job Finder(채용공고 알림)를 로컬에서 완전히 돌리려면 위 Supabase 값에 더해
 [`supabase/job-alert-schema.sql`](./supabase/job-alert-schema.sql)을 대시보드에서 먼저 실행해야 한다.
-사람인·원티드·잡코리아는 로그인·API 키 없이 바로 동작한다. 리멤버는 로그인 세션이
-있어야 조회 가능해 아직 미완성이며(`src/job/sites/remember.ts` 참고), 완성 전까지는
-아래 환경변수가 없어 "인증 실패"로만 표시되고 나머지 3개 사이트는 그대로 동작한다:
+사람인·원티드·잡코리아는 로그인·API 키 없이 바로 동작한다. 리멤버만 아래 환경변수가
+필요하다(없으면 리멤버만 "인증 실패"로 표시되고 나머지 3개 사이트는 그대로 동작한다).
+값이 만료되면 사용자가 리멤버에 로그인한 채 DevTools Network 탭에서 `job_postings/search`
+요청의 `authorization` 헤더 값을 다시 캡처해 갱신해야 한다:
 
 ```
-REMEMBER_SESSION_COOKIE=...   # 리멤버 로그인 후 DevTools로 캡처한 세션 쿠키
+REMEMBER_AUTH_TOKEN=Token token=...   # 리멤버 로그인 후 DevTools로 캡처한 Authorization 헤더 값
 ```
 
 ## 배포
