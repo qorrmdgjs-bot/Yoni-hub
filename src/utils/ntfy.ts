@@ -1,10 +1,8 @@
-const NTFY_TOPIC = 'cgv-imax-odyssey';
-
 export async function sendNtfy(
   title: string,
   message: string,
+  topic: string,
   priority: number = 4,
-  topic: string = NTFY_TOPIC,
 ): Promise<boolean> {
   try {
     const res = await fetch(`https://ntfy.sh/${topic}`, {

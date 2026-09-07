@@ -234,7 +234,7 @@ export default function JobPage() {
           </div>
         ))}
 
-        <p className="text-[10px] text-gray-300 text-center mt-6">GitHub Actions 30분 자동 체크 · ntfy 푸시 알림</p>
+        <p className="text-[10px] text-gray-300 text-center mt-6">GitHub Actions 하루 2번(오전 11시·오후 3시) 자동 체크 · ntfy 푸시 알림</p>
       </div>
     </div>
   );
