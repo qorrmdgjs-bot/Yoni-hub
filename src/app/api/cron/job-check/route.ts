@@ -157,7 +157,7 @@ async function handleAdapterFailure(site: SourceSite, message: string, prevHealt
       { onConflict: 'source_site' },
     );
   if (!alreadyAlerted) {
-    await sendNtfy(`⚠️ ${site} 체크 실패`, `${message}\n\n리멤버라면 세션 쿠키 갱신이 필요할 수 있습니다.`, 4, JOB_NTFY_TOPIC);
+    await sendNtfy(`⚠️ ${site} 체크 실패`, `${message}\n\n리멤버라면 REMEMBER_AUTH_TOKEN 갱신이 필요할 수 있습니다.`, 4, JOB_NTFY_TOPIC);
   }
 }
 
