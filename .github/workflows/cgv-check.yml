@@ -1,4 +1,4 @@
-name: 30분 자동 체크 (CGV IMAX · 채용공고)
+name: CGV IMAX 오디세이 체크
 
 on:
   schedule:
@@ -16,12 +16,4 @@ jobs:
             -o response.json
           cat response.json
           echo ""
-          echo "✅ CGV 체크 완료"
-      - name: 채용공고 체크
-        run: |
-          curl -s -X GET "https://diet-daily.vercel.app/api/cron/job-check" \
-            -H "Accept: application/json" \
-            -o job-response.json
-          cat job-response.json
-          echo ""
-          echo "✅ 채용공고 체크 완료"
+          echo "✅ 체크 완료"
