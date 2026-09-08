@@ -19,6 +19,7 @@ interface PostingRow {
   reason: string | null;
   url: string;
   first_seen_at: string;
+  starred: boolean;
 }
 
 interface CheckResult {
@@ -55,9 +56,25 @@ function tierLabel(tier: PostingRow['recommend_tier']) {
   return { label: '평점 정보 없음', className: 'text-gray-400' };
 }
 
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      className={`w-5 h-5 ${filled ? 'fill-amber-400 stroke-amber-400' : 'fill-none stroke-gray-300'}`}
+      strokeWidth={1.5}
+    >
+      <path
+        d="M10 2.5l2.36 4.78 5.27.77-3.82 3.72.9 5.25L10 14.6l-4.71 2.42.9-5.25-3.82-3.72 5.27-.77z"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function JobPage() {
   const [postings, setPostings] = useState<PostingRow[]>([]);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [viewTab, setViewTab] = useState<'all' | 'starred'>('all');
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [lastCheck, setLastCheck] = useState<CheckResult | null>(null);
@@ -85,15 +102,25 @@ export default function JobPage() {
     setChecking(false);
   };
 
-  const visible = postings.filter((p) => showExcluded || p.recommend_tier !== 'excluded');
-  const sorted = [...visible].sort((a, b) => {
+  const toggleStar = async (p: PostingRow) => {
+    const next = !p.starred;
+    setPostings((prev) => prev.map((row) => (row.id === p.id ? { ...row, starred: next } : row)));
+    await supabase.from('job_postings').update({ starred: next }).eq('id', p.id);
+  };
+
+  const byTier = (a: PostingRow, b: PostingRow) => {
     const rank = { strong: 0, normal: 1, null: 2, excluded: 3 } as const;
     const ra = rank[a.recommend_tier ?? 'null'];
     const rb = rank[b.recommend_tier ?? 'null'];
     if (ra !== rb) return ra - rb;
     return b.first_seen_at.localeCompare(a.first_seen_at);
-  });
+  };
+
+  const starredSorted = postings.filter((p) => p.starred).sort(byTier);
+  const visible = postings.filter((p) => showExcluded || p.recommend_tier !== 'excluded');
+  const sorted = [...visible].sort(byTier);
   const excludedCount = postings.filter((p) => p.recommend_tier === 'excluded').length;
+  const listed = viewTab === 'starred' ? starredSorted : sorted;
 
   return (
     <div className="jobfinder-root min-h-screen bg-white text-gray-900">
@@ -171,8 +198,21 @@ export default function JobPage() {
         </div>
 
         <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200">
-          <h2 className="text-sm font-semibold text-gray-700">최근 공고 <span className="text-gray-400 font-normal">{sorted.length}건</span></h2>
-          {excludedCount > 0 && (
+          <div className="flex gap-4">
+            <button
+              onClick={() => setViewTab('all')}
+              className={`text-sm font-semibold ${viewTab === 'all' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              전체 <span className="font-normal">{sorted.length}</span>
+            </button>
+            <button
+              onClick={() => setViewTab('starred')}
+              className={`text-sm font-semibold ${viewTab === 'starred' ? 'text-gray-900' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              ⭐ 관심기업 <span className="font-normal">{starredSorted.length}</span>
+            </button>
+          </div>
+          {viewTab === 'all' && excludedCount > 0 && (
             <button onClick={() => setShowExcluded((v) => !v)} className="text-xs text-gray-400 hover:text-gray-600">
               {showExcluded ? '제외된 공고 숨기기' : `제외된 공고 보기 (${excludedCount})`}
             </button>
@@ -181,40 +221,52 @@ export default function JobPage() {
 
         {loading ? (
           <p className="text-gray-400 text-sm text-center py-10">불러오는 중...</p>
-        ) : sorted.length === 0 ? (
+        ) : listed.length === 0 ? (
           <div className="text-center py-10 text-gray-400 text-sm">
-            <p>아직 조건에 맞는 공고가 없어요</p>
-            <p className="text-xs mt-1">위 버튼으로 직접 확인해보세요</p>
+            {viewTab === 'starred' ? (
+              <p>⭐ 표시를 누르면 관심기업으로 여기 모여요</p>
+            ) : (
+              <>
+                <p>아직 조건에 맞는 공고가 없어요</p>
+                <p className="text-xs mt-1">위 버튼으로 직접 확인해보세요</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {sorted.map((p) => {
+            {listed.map((p) => {
               const tier = tierLabel(p.recommend_tier);
               return (
-                <a
+                <div
                   key={`${p.source_site}_${p.id}`}
-                  href={p.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={`flex gap-3 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${p.recommend_tier === 'excluded' ? 'opacity-50' : ''}`}
+                  className={`flex gap-2 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${p.recommend_tier === 'excluded' ? 'opacity-50' : ''}`}
                 >
-                  <div className="shrink-0 w-9 h-9 rounded bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
-                    {(SITE_LABEL[p.source_site] ?? p.source_site).slice(0, 2)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <h3 className="text-[14px] font-semibold text-gray-900 leading-snug">{p.title}</h3>
-                      <span className={`shrink-0 text-[11px] font-medium ${tier.className}`}>{tier.label}</span>
+                  <button
+                    onClick={() => toggleStar(p)}
+                    className="shrink-0 pt-0.5"
+                    aria-label={p.starred ? '관심기업 해제' : '관심기업으로 등록'}
+                  >
+                    <StarIcon filled={p.starred} />
+                  </button>
+                  <a href={p.url} target="_blank" rel="noopener noreferrer" className="flex gap-3 flex-1 min-w-0">
+                    <div className="shrink-0 w-9 h-9 rounded bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
+                      {(SITE_LABEL[p.source_site] ?? p.source_site).slice(0, 2)}
                     </div>
-                    <p className="text-[13px] text-gray-600 mt-0.5">{p.company}</p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {[p.location, p.career_text, p.employment_type, SITE_LABEL[p.source_site] ?? p.source_site, timeAgo(p.first_seen_at)]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </p>
-                    {p.reason && <p className="text-xs text-gray-500 mt-1">{p.reason}</p>}
-                  </div>
-                </a>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-[14px] font-semibold text-gray-900 leading-snug">{p.title}</h3>
+                        <span className={`shrink-0 text-[11px] font-medium ${tier.className}`}>{tier.label}</span>
+                      </div>
+                      <p className="text-[13px] text-gray-600 mt-0.5">{p.company}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {[p.location, p.career_text, p.employment_type, SITE_LABEL[p.source_site] ?? p.source_site, timeAgo(p.first_seen_at)]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                      {p.reason && <p className="text-xs text-gray-500 mt-1">{p.reason}</p>}
+                    </div>
+                  </a>
+                </div>
               );
             })}
           </div>

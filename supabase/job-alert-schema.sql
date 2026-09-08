@@ -1,6 +1,9 @@
 -- 채용공고 알림 기능용 테이블. cgv_screenings와 같은 Supabase 프로젝트
 -- (jejomunoscgnozdgojcj)에 Supabase 대시보드 SQL Editor에서 직접 실행할 것.
 -- 코드 배포와 별개로 운영 DB에 먼저 적용해야 한다(AGENTS.md 관행과 동일).
+--
+-- 이미 job_postings가 있는 환경(운영 DB)에는 아래 한 줄만 추가로 실행하면 된다:
+--   alter table job_postings add column if not exists starred boolean not null default false;
 
 create table job_postings (
   id bigint generated always as identity primary key,
@@ -19,6 +22,7 @@ create table job_postings (
   posted_at timestamptz,
   first_seen_at timestamptz not null default now(),
   notified boolean not null default false,
+  starred boolean not null default false,
   raw jsonb
 );
 create unique index job_postings_source_external_uidx on job_postings (source_site, external_id);
