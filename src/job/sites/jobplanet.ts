@@ -48,16 +48,13 @@ export async function fetchCompanyRating(companyName: string): Promise<Jobplanet
 
   if (cards.length === 0) return null;
 
-  // 검색 결과 1등이 전혀 다른 회사인 경우가 흔하다(예: "제논" 검색 1등이 마인즈앤컴퍼니).
-  // 이름이 확실히 맞을 때만 채택하고, 애매하면 평점 없음으로 둔다 — 엉뚱한 회사의
-  // 평점을 붙이는 것보다 비어 있는 편이 낫다.
+  // 회사명이 정확히 같을 때만 채택한다. 잡플래닛 검색은 매칭이 없으면 인기 회사들을
+  // 그냥 뱉기 때문에("그렌느" 검색 → 하림산업·ASML코리아…), 부분일치라도 허용하면
+  // 엉뚱한 회사의 평점이 붙어 화면 전체의 신뢰도가 무너진다.
+  // normalizeCompany가 (주)·㈜·주식회사·공백·문장부호를 지우므로 "주식회사 그렌느"와
+  // "그렌느(주)"는 같은 것으로 취급되고, 그 외 이름이 다르면 평점 없음으로 둔다.
   const target = normalizeCompany(companyName);
-  const best =
-    cards.find((c) => normalizeCompany(c.name) === target) ??
-    cards.find((c) => {
-      const n = normalizeCompany(c.name);
-      return n.includes(target) || target.includes(n);
-    });
+  const best = cards.find((c) => normalizeCompany(c.name) === target);
   if (!best) return null;
 
   return {
@@ -67,8 +64,27 @@ export async function fetchCompanyRating(companyName: string): Promise<Jobplanet
   };
 }
 
+/**
+ * 잡플래닛 검색창에 넣을 회사명을 다듬는다.
+ *
+ * 공고에 적힌 회사명을 그대로 검색하면 법인 표기 때문에 0건이 나오는 경우가 많다(실측):
+ *   "㈜아이즈비전" → 0건 / "아이즈비전" → 2.8점
+ *   "동양콘크리트산업㈜" → 0건 / "동양콘크리트산업" → 1.5점
+ *   "주식회사 엠티데이타" → 0건
+ * "(주)에이블리코퍼레이션"처럼 통과되는 표기도 있어 일괄로 떼는 편이 안전하다.
+ * 매칭은 여전히 원본 이름으로 하므로(normalizeCompany) 검색만 느슨해질 뿐이다.
+ */
+function toSearchQuery(name: string): string {
+  const cleaned = name
+    .replace(/㈜|\(주\)|\(유\)|주식회사|유한회사|유한책임회사/g, ' ')
+    .replace(/\([^)]*\)/g, ' ') // "(OlgodeunMuyeokCorp.)" 같은 병기 제거
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || name;
+}
+
 async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
-  const res = await fetch(`https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`, {
+  const res = await fetch(`https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(toSearchQuery(companyName))}`, {
     headers: HEADERS,
   });
   if (!res.ok) throw new Error(`jobplanet http ${res.status}`);
@@ -96,7 +112,7 @@ async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
  * 제3자 서비스라 언제든 느려지거나 막힐 수 있다 — 실패는 job_adapter_health에 남는다.
  */
 async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> {
-  const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`;
+  const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(toSearchQuery(companyName))}`;
   const headers: Record<string, string> = { 'x-engine': 'direct', 'x-return-format': 'html' };
   // 키 없이도 동작하지만 분당 20건 안팎으로 제한된다. JINA_API_KEY를 넣으면 한도가
   // 크게 올라가서 백필이 훨씬 빨리 끝난다(무료 키로 충분).
