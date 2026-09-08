@@ -48,9 +48,17 @@ export async function fetchCompanyRating(companyName: string): Promise<Jobplanet
 
   if (cards.length === 0) return null;
 
+  // 검색 결과 1등이 전혀 다른 회사인 경우가 흔하다(예: "제논" 검색 1등이 마인즈앤컴퍼니).
+  // 이름이 확실히 맞을 때만 채택하고, 애매하면 평점 없음으로 둔다 — 엉뚱한 회사의
+  // 평점을 붙이는 것보다 비어 있는 편이 낫다.
   const target = normalizeCompany(companyName);
-  const exact = cards.find((c) => normalizeCompany(c.name) === target);
-  const best = exact ?? cards[0];
+  const best =
+    cards.find((c) => normalizeCompany(c.name) === target) ??
+    cards.find((c) => {
+      const n = normalizeCompany(c.name);
+      return n.includes(target) || target.includes(n);
+    });
+  if (!best) return null;
 
   return {
     rating: best.rating,
@@ -78,37 +86,38 @@ async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
 /**
  * 잡플래닛은 Cloudflare로 데이터센터 IP를 막는다 — Vercel에서 직접 부르면 403이 뜬다
  * (실측: 60건 시도 60건 403, 같은 요청이 로컬에서는 100% 200).
- * 그래서 페이지를 텍스트로 변환해주는 공개 리더 프록시를 경유한다. 프록시가 주는 건
- * HTML이 아니라 마크다운이라 파싱 규칙이 다르다:
- *   #### (주)에이블리코퍼레이션 3.1 IT/웹/통신∙서울 … ](https://www.jobplanet.co.kr/companies/339895)
- * 직접 조회와 같은 결과가 나오는 것은 확인했지만(에이블리 3.1, 삼성전자 3.8 등),
+ * 그래서 공개 리더 프록시를 경유한다.
+ *
+ * `x-engine: direct`가 핵심이다. 이게 없으면 프록시가 헤드리스 브라우저로 페이지를
+ * 렌더링해서 건당 16초씩 걸리는데, 우리가 필요한 값은 이미 원본 HTML 안에 들어 있어서
+ * 렌더링이 전혀 필요 없다. direct + HTML로 받으면 건당 0.6~1.1초로 끝나고,
+ * 응답이 원본 HTML이라 직접 조회와 같은 파서를 그대로 쓸 수 있다.
+ *
  * 제3자 서비스라 언제든 느려지거나 막힐 수 있다 — 실패는 job_adapter_health에 남는다.
  */
 async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> {
   const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`;
-  const res = await fetch(`https://r.jina.ai/${target}`, { headers: { Accept: 'text/plain' } });
+  const res = await fetch(`https://r.jina.ai/${target}`, {
+    headers: { 'x-engine': 'direct', 'x-return-format': 'html' },
+  });
   if (!res.ok) throw new Error(`jobplanet reader http ${res.status}`);
-  const text = await res.text();
-
-  const cards: CompanyCard[] = [];
-  const re = /####\s+(.+?)\s+(\d(?:\.\d)?)\s[\s\S]*?\]\(https:\/\/www\.jobplanet\.co\.kr\/companies\/(\d+)\)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    cards.push({ name: m[1].trim(), rating: Number(m[2]), companyId: Number(m[3]), tags: [] });
-  }
-  return cards;
+  return extractCompanyCards(await res.text());
 }
 
 function extractCompanyCards(html: string): CompanyCard[] {
   const cards: CompanyCard[] = [];
-  const re =
-    /"company_id":(\d+),"name":"([^"]+)"[\s\S]{0,400}?"rate_total_avg":([\d.]+)[\s\S]{0,200}?"tags":\[([^\]]*)\]/g;
+  // tags는 없는 회사가 있어서 필수로 걸면 안 된다 — 예전 정규식은 tags를 요구하는 바람에
+  // 평점이 멀쩡히 있는 회사(꽃길코리아 3.9 등)를 통째로 놓쳤다.
+  const re = /"company_id":(\d+),"name":"([^"]+)"[\s\S]{0,600}?"rate_total_avg":([\d.]+)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {
-    const tags = m[4]
-      .split(',')
-      .map((s) => s.trim().replace(/^"|"$/g, ''))
-      .filter(Boolean);
+    const tagsMatch = html.slice(m.index, m.index + 1200).match(/"tags":\[([^\]]*)\]/);
+    const tags = tagsMatch
+      ? tagsMatch[1]
+          .split(',')
+          .map((s) => s.trim().replace(/^"|"$/g, ''))
+          .filter(Boolean)
+      : [];
     cards.push({ companyId: Number(m[1]), name: m[2], rating: Number(m[3]), tags });
   }
   return cards;
