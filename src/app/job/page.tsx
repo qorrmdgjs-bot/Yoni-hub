@@ -73,14 +73,15 @@ function StarIcon({ filled }: { filled: boolean }) {
 
 export default function JobPage() {
   const [postings, setPostings] = useState<PostingRow[]>([]);
-  const [showExcluded, setShowExcluded] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
   const [viewTab, setViewTab] = useState<'all' | 'starred'>('all');
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [lastCheck, setLastCheck] = useState<CheckResult | null>(null);
 
   const loadPostings = useCallback(async () => {
-    const { data } = await supabase.from('job_postings').select('*').order('first_seen_at', { ascending: false }).limit(80);
+    // 평점 없음·2점 미만을 숨기면서 실제로 보이는 건수가 줄어, 넉넉히 받아온다.
+    const { data } = await supabase.from('job_postings').select('*').order('first_seen_at', { ascending: false }).limit(300);
     setPostings((data ?? []) as PostingRow[]);
     setLoading(false);
   }, []);
@@ -117,9 +118,12 @@ export default function JobPage() {
   };
 
   const starredSorted = postings.filter((p) => p.starred).sort(byTier);
-  const visible = postings.filter((p) => showExcluded || p.recommend_tier !== 'excluded');
+  // 평점이 확인된 공고만 기본으로 보여준다. 잡플래닛에 없는 회사(평점 없음)와
+  // 2점 미만은 판단에 쓸 수 없으니 목록에서 빼고, 토글로만 확인할 수 있게 한다.
+  const isHidden = (p: PostingRow) => p.recommend_tier === 'excluded' || p.recommend_tier === null;
+  const visible = postings.filter((p) => showHidden || !isHidden(p));
   const sorted = [...visible].sort(byTier);
-  const excludedCount = postings.filter((p) => p.recommend_tier === 'excluded').length;
+  const hiddenCount = postings.filter(isHidden).length;
   const listed = viewTab === 'starred' ? starredSorted : sorted;
 
   return (
@@ -173,7 +177,9 @@ export default function JobPage() {
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mb-6">잡플래닛 2점 미만은 알림에서 제외돼요.</p>
+        <p className="text-xs text-gray-400 mb-6">
+          잡플래닛 평점이 2점 미만이거나 확인되지 않은 공고는 목록에서 숨겨요. 평점은 회사명이 정확히 일치할 때만 표시돼요.
+        </p>
 
         <div className="rounded-lg border border-gray-200 bg-gray-50 p-5 mb-6">
           <p className="text-sm text-gray-700 leading-relaxed">{CRITERIA_SUMMARY}</p>
@@ -209,9 +215,9 @@ export default function JobPage() {
               ⭐ 관심기업 <span className="font-normal">{starredSorted.length}</span>
             </button>
           </div>
-          {viewTab === 'all' && excludedCount > 0 && (
-            <button onClick={() => setShowExcluded((v) => !v)} className="text-xs text-gray-400 hover:text-gray-600">
-              {showExcluded ? '제외된 공고 숨기기' : `제외된 공고 보기 (${excludedCount})`}
+          {viewTab === 'all' && hiddenCount > 0 && (
+            <button onClick={() => setShowHidden((v) => !v)} className="text-xs text-gray-400 hover:text-gray-600">
+              {showHidden ? '숨겨진 공고 접기' : `숨겨진 공고 보기 (${hiddenCount})`}
             </button>
           )}
         </div>
@@ -236,7 +242,7 @@ export default function JobPage() {
               return (
                 <div
                   key={`${p.source_site}_${p.id}`}
-                  className={`flex gap-2 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${p.recommend_tier === 'excluded' ? 'opacity-50' : ''}`}
+                  className={`flex gap-2 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${isHidden(p) ? 'opacity-50' : ''}`}
                 >
                   <button
                     onClick={() => toggleStar(p)}
