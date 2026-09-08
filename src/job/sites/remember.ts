@@ -31,6 +31,11 @@ interface Address {
   address_level2?: string;
 }
 
+interface RememberResponse {
+  data?: RawPosting[];
+  meta?: { logger_info?: { user_meta_data?: { user_id?: number | null } } };
+}
+
 interface RawPosting {
   id: number;
   title: string;
@@ -54,6 +59,7 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
   }
 
   const byId = new Map<string, JobPosting>();
+  let authOk = false;
 
   for (const kw of KEYWORDS) {
     const body = {
@@ -82,14 +88,22 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
     }
     if (!res.ok) throw new Error(`remember http ${res.status}`);
 
-    const json = (await res.json()) as { data?: RawPosting[] };
+    const json = (await res.json()) as RememberResponse;
+
+    // 토큰이 만료돼도 401이 오지 않는다 — 실측 결과 무효 토큰이든 헤더가 아예 없든
+    // 200에 "비로그인 공개 결과"가 그대로 온다. 유일하게 구분되는 신호가 이 user_id로,
+    // 인증이 먹으면 숫자, 아니면 null이다. 이걸 안 보면 토큰이 죽어도 아무도 모른 채
+    // 개인화 없는 결과만 계속 받게 된다.
+    if (json.meta?.logger_info?.user_meta_data?.user_id != null) authOk = true;
+
     for (const raw of json.data ?? []) {
       const posting = toJobPosting(raw);
       if (posting) byId.set(posting.externalId, posting);
     }
   }
 
-  return { postings: [...byId.values()] };
+  // 토큰이 죽었어도 공개 결과는 쓸모가 있으니 버리지 않고, 갱신 필요만 알린다.
+  return { postings: [...byId.values()], authFailed: !authOk };
 }
 
 function toJobPosting(raw: RawPosting): JobPosting | null {

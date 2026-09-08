@@ -94,6 +94,9 @@ export async function GET(request: NextRequest) {
       if (result.value.authFailed) {
         authFailures.push(site);
         await handleAdapterFailure(site, `${site} 인증/세션 만료`, healthMap.get(site));
+        // 인증이 풀려도 받아온 공고가 있으면 버리지 않는다 — 리멤버는 토큰이 죽어도
+        // 개인화만 빠진 공개 결과를 주기 때문에 그대로 쓰는 편이 낫다.
+        candidates.push(...result.value.postings);
         continue;
       }
 
