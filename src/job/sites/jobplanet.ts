@@ -45,7 +45,14 @@ export async function fetchCompanyRating(companyName: string): Promise<Jobplanet
   const html = await res.text();
 
   const cards = extractCompanyCards(html);
-  if (cards.length === 0) return null;
+  if (cards.length === 0) {
+    // 200인데 카드가 하나도 안 잡히면 (a) 정말 없는 회사이거나 (b) 차단·챌린지 페이지를
+    // 받은 것이다. 둘은 대응이 전혀 다르므로 후자는 에러로 올려 보낸다.
+    if (!html.includes('rate_total_avg')) {
+      throw new Error(`jobplanet blocked or markup changed (len=${html.length})`);
+    }
+    return null;
+  }
 
   const target = normalizeCompany(companyName);
   const exact = cards.find((c) => normalizeCompany(c.name) === target);
