@@ -60,7 +60,6 @@ export default function JobPage() {
   const [showExcluded, setShowExcluded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
-  const [testingSend, setTestingSend] = useState(false);
   const [lastCheck, setLastCheck] = useState<CheckResult | null>(null);
 
   const loadPostings = useCallback(async () => {
@@ -84,18 +83,6 @@ export default function JobPage() {
       setLastCheck({ matchedCount: 0, newCount: 0, notifiedCount: 0, excludedCount: 0, authFailures: [], error: '확인 실패' });
     }
     setChecking(false);
-  };
-
-  const handleTestNtfy = async () => {
-    setTestingSend(true);
-    try {
-      const res = await fetch('/api/job-test-ntfy');
-      const result = await res.json();
-      alert(result.sent ? '테스트 알림을 보냈어요. ntfy 앱을 확인하세요.' : '알림 전송에 실패했어요.');
-    } catch {
-      alert('알림 전송에 실패했어요.');
-    }
-    setTestingSend(false);
   };
 
   const visible = postings.filter((p) => showExcluded || p.recommend_tier !== 'excluded');
@@ -128,22 +115,13 @@ export default function JobPage() {
           ))}
         </div>
 
-        <div className="flex gap-2 mb-4">
-          <button
-            onClick={handleManualCheck}
-            disabled={checking}
-            className="flex-1 rounded-md py-2.5 px-4 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
-          >
-            {checking ? '확인 중...' : '지금 확인하기'}
-          </button>
-          <button
-            onClick={handleTestNtfy}
-            disabled={testingSend}
-            className="rounded-md py-2.5 px-4 border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-          >
-            {testingSend ? '전송 중...' : '테스트 알림'}
-          </button>
-        </div>
+        <button
+          onClick={handleManualCheck}
+          disabled={checking}
+          className="w-full rounded-md py-2.5 px-4 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 mb-4"
+        >
+          {checking ? '확인 중...' : '지금 확인하기'}
+        </button>
 
         {lastCheck && (
           <div
@@ -172,6 +150,25 @@ export default function JobPage() {
           ntfy 앱에서 <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">job-alert-yoni</code> 토픽을 구독하면 새 공고를 바로 받아요.
           잡플래닛 2점 미만은 알림에서 제외돼요.
         </p>
+
+        <div className="pb-6 mb-6 border-b border-gray-200">
+          <p className="text-sm text-gray-600 leading-relaxed">{CRITERIA_SUMMARY}</p>
+
+          <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4 mt-4">
+            {CRITERIA_GROUPS.map((group) => (
+              <div key={group.id}>
+                <p className="text-xs font-semibold text-gray-500">{group.title} · {group.subtitle}</p>
+                <ul className="mt-1 space-y-0.5">
+                  {group.items.map((item) => (
+                    <li key={item.mark} className="text-xs text-gray-400">
+                      {item.mark} {item.title}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-200">
           <h2 className="text-sm font-semibold text-gray-700">최근 공고 <span className="text-gray-400 font-normal">{sorted.length}건</span></h2>
@@ -222,25 +219,6 @@ export default function JobPage() {
             })}
           </div>
         )}
-
-        <div className="mt-10 pt-6 border-t border-gray-200">
-          <p className="text-sm text-gray-600 leading-relaxed">{CRITERIA_SUMMARY}</p>
-
-          <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4 mt-4">
-            {CRITERIA_GROUPS.map((group) => (
-              <div key={group.id}>
-                <p className="text-xs font-semibold text-gray-500">{group.title} · {group.subtitle}</p>
-                <ul className="mt-1 space-y-0.5">
-                  {group.items.map((item) => (
-                    <li key={item.mark} className="text-xs text-gray-400">
-                      {item.mark} {item.title}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </div>
 
         <p className="text-[11px] text-gray-300 text-center mt-8">GitHub Actions 하루 1번(오후 1시) 자동 체크 · ntfy 푸시 알림</p>
       </div>
