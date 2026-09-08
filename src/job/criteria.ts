@@ -48,15 +48,56 @@ export function matchesCriteria(p: JobPosting): boolean {
   if (!KEYWORDS.some((k) => haystack.includes(k))) return false;
 
   const location = p.location ?? '';
-  if (location && !ALLOWED_LOCATIONS.some((l) => location.includes(l))) return false;
+  if (location && !locationAllowed(location)) return false;
   // location이 아예 없는 사이트(예: 잡코리아는 코드로만 걸러 텍스트가 없음)는 이미
   // 어댑터 단에서 지역 필터를 마쳤다고 보고 여기서는 통과시킨다.
 
   if (p.isRegular === false) return false; // 명시적으로 정규직이 아니면 제외
 
+  // 상시채용은 실제로 사람을 급히 뽑는 공고가 아니라 상시 게시물에 가까워 제외한다.
+  // 사이트가 명시한 경우만 걸린다 — alwaysOpen 주석 참고.
+  if (p.alwaysOpen) return false;
+
   if (!careerOverlaps(p.careerMin, p.careerMax)) return false;
 
   return true;
+}
+
+/**
+ * 근무지가 **전부** 허용 지역인지. 강남구 공고에 다른 지역이 함께 붙어 있으면 제외한다
+ * (사용자 요청 — 강남구·서초구만 출퇴근 가능하므로 "강남 외 1곳"은 지원 대상이 아니다).
+ *
+ * 여러 지역을 한 필드에 담는 건 잡코리아(", " 구분)와 리멤버("; " 구분)뿐이지만,
+ * 구분자는 사이트가 바꿀 수 있어 흔한 것들을 다 나눠 본다.
+ */
+function locationAllowed(location: string): boolean {
+  const segments = location
+    .split(/[;,/·\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (segments.length === 0) return false;
+
+  let hasAllowed = false;
+  for (const seg of segments) {
+    if (ALLOWED_LOCATIONS.some((l) => seg.includes(l))) {
+      hasAllowed = true;
+      continue;
+    }
+    // 허용 지역이 아닌데 구/시/군 이름이 적혀 있으면 "다른 지역이 추가로" 있는 것.
+    if (hasOtherDistrict(seg)) return false;
+    // 그 외(예: "서울"만 적힌 조각, 도로명 조각)는 판단 보류 — 다른 조각에 맡긴다.
+  }
+
+  return hasAllowed;
+}
+
+/** "성남시"·"마포구"처럼 구/시/군 단위 지명이 들어 있는지. 광역시 이름 자체는 지명으로 안 친다 */
+function hasOtherDistrict(segment: string): boolean {
+  const METRO_NAMES = ['서울시', '서울특별시'];
+  for (const m of segment.matchAll(/[가-힣]{2,}(?:구|시|군)(?![가-힣])/g)) {
+    if (!METRO_NAMES.includes(m[0])) return true;
+  }
+  return false;
 }
 
 function careerOverlaps(min: number | null, max: number | null): boolean {

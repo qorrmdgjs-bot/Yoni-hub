@@ -46,7 +46,13 @@ const SITE_LABEL: Record<string, string> = {
   remember: '리멤버',
 };
 
-const FILTER_TAGS = [...KEYWORDS, ...ALLOWED_LOCATIONS, '정규직', `경력 ${CAREER_MIN}~${CAREER_MAX}년`];
+const FILTER_TAGS = [
+  ...KEYWORDS,
+  ...ALLOWED_LOCATIONS,
+  '정규직',
+  `경력 ${CAREER_MIN}~${CAREER_MAX}년`,
+  '상시채용 제외',
+];
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();

@@ -104,6 +104,9 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
       url: `https://www.wanted.co.kr/wd/${item.id}`,
       postedAt: null, // 검색 응답에 게시일 필드가 없어 first_seen_at으로 대체
       expiresAt: null, // 원티드는 마감일을 주지 않는다(상세의 due_time도 항상 null)
+      // 마감일 필드가 없는 것과 "상시채용"은 다르다. 원티드는 전자라 false를 유지한다 —
+      // true로 두면 원티드 공고가 전부 걸러진다.
+      alwaysOpen: false,
     });
   }
 

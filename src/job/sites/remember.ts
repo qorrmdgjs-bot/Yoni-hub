@@ -147,5 +147,8 @@ function toJobPosting(raw: RawPosting): JobPosting | null {
     url: `https://career.rememberapp.co.kr/job/posting/${raw.id}`,
     postedAt: raw.starts_at ?? null,
     expiresAt: raw.ends_at ?? null,
+    // 리멤버는 ends_at을 비워두기만 할 뿐 상시채용이라고 명시하지 않는다(58건 중 47건이
+    // 빈 값). 상시채용인지 그냥 안 적은 건지 구분할 신호가 없어 제외하지 않는다.
+    alwaysOpen: false,
   };
 }
