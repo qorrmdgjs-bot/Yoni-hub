@@ -25,6 +25,12 @@ export interface JobPosting {
   postedAt: string | null;
   /** 접수 마감 시각. 상시채용이거나 사이트가 알려주지 않으면 null(만료 처리 대상 아님) */
   expiresAt: string | null;
+  /**
+   * 사이트가 "상시채용/채용시 마감"이라고 **명시한** 경우에만 true — 알림에서 제외한다.
+   * 마감일 필드를 아예 안 주는 사이트(원티드)나 표기를 못 읽은 경우는 false다.
+   * 이 둘을 뭉뚱그리면 원티드 공고가 통째로 사라진다.
+   */
+  alwaysOpen: boolean;
 }
 
 export interface SiteAdapterResult {

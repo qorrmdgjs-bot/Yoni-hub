@@ -89,6 +89,8 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
       .map((code) => jobCategoryNames.get(String(code)))
       .filter((name): name is string => !!name);
 
+    const deadline = parseDeadline(job.applicationPeriod?.end);
+
     postings.push({
       sourceSite: 'jobkorea',
       externalId: job.legacyJobNo,
@@ -108,11 +110,25 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
       perkHints: job.benefitNameList ?? [],
       url: `https://www.jobkorea.co.kr/Recruit/GI_Read/${job.legacyJobNo}`,
       postedAt: job.createdAt ?? null,
-      expiresAt: job.applicationPeriod?.end ?? null,
+      expiresAt: deadline.expiresAt,
+      alwaysOpen: deadline.alwaysOpen,
     });
   }
 
   return { postings };
+}
+
+/**
+ * 잡코리아는 상시채용 공고의 마감일을 비워두지 않고 `2070-01-01`처럼 아주 먼 날짜로
+ * 채워 보낸다(실검증). 그대로 저장하면 화면에 "2070년 마감"이 뜨므로, 이걸 상시채용
+ * 신호로 읽는다.
+ */
+function parseDeadline(end: string | undefined): { expiresAt: string | null; alwaysOpen: boolean } {
+  if (!end) return { expiresAt: null, alwaysOpen: false };
+  const date = new Date(end);
+  if (Number.isNaN(date.getTime())) return { expiresAt: null, alwaysOpen: false };
+  if (date.getFullYear() >= 2050) return { expiresAt: null, alwaysOpen: true };
+  return { expiresAt: date.toISOString(), alwaysOpen: false };
 }
 
 /** 직무 코드 → 이름 (예: 1000207 → 회계담당자). 트리 구조라 재귀로 편다. */

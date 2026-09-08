@@ -100,6 +100,7 @@ function extractCards(html: string): JobPosting[] {
       url: `https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=${id}`,
       postedAt: null,
       expiresAt: parseDeadline(block),
+      alwaysOpen: isAlwaysOpen(block),
     });
   }
 
@@ -112,6 +113,12 @@ function extractCards(html: string): JobPosting[] {
  * 연도가 없어서 이미 지난 월이면 내년으로 본다(12월에 뜬 1월 마감 공고 대응).
  * 상시채용처럼 마감이 없는 건 null — 만료 삭제 대상에서 빠진다.
  */
+/** 카드에 "상시채용"·"채용시 마감"·"수시채용"이라고 적혀 있으면 true */
+function isAlwaysOpen(block: string): boolean {
+  const text = block.match(/<span class="date">([^<]*)<\/span>/)?.[1]?.trim() ?? '';
+  return /상시|채용시|수시/.test(text);
+}
+
 function parseDeadline(block: string): string | null {
   const text = block.match(/<span class="date">([^<]*)<\/span>/)?.[1]?.trim() ?? '';
   if (!text || /상시|채용시|수시/.test(text)) return null;

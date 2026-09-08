@@ -54,6 +54,10 @@ export function matchesCriteria(p: JobPosting): boolean {
 
   if (p.isRegular === false) return false; // 명시적으로 정규직이 아니면 제외
 
+  // 상시채용은 실제로 사람을 급히 뽑는 공고가 아니라 상시 게시물에 가까워 제외한다.
+  // 사이트가 명시한 경우만 걸린다 — alwaysOpen 주석 참고.
+  if (p.alwaysOpen) return false;
+
   if (!careerOverlaps(p.careerMin, p.careerMax)) return false;
 
   return true;

@@ -27,6 +27,8 @@ const JOBPLANET_MIN_GAP_MS = process.env.JINA_API_KEY ? 300 : 3_400;
  * 건수만으로 제한하면 함수 실행 시간을 넘길 수 있다. 못 채운 건 다음 사이클에 이어서 한다.
  */
 const JOBPLANET_BACKFILL_BUDGET_MS = 60_000;
+/** 기존 공고 마감일 갱신을 몇 건씩 묶어 보낼지 (Supabase에 한꺼번에 몰지 않기 위한 상한) */
+const EXPIRY_REFRESH_CHUNK = 10;
 
 const ADAPTERS: { site: SourceSite; fetchPostings: () => Promise<SiteAdapterResult> }[] = [
   { site: 'saramin', fetchPostings: saramin.fetchPostings },
@@ -41,8 +43,10 @@ interface AdapterHealthRow {
 }
 
 interface ExistingPostingRow {
+  id: number;
   source_site: string;
   external_id: string;
+  expires_at: string | null;
 }
 
 interface BackfillRow {
@@ -106,11 +110,10 @@ export async function GET(request: NextRequest) {
 
     const matched = candidates.filter(matchesCriteria);
 
-    const { data: existing } = await supabase.from('job_postings').select('source_site, external_id');
-    const existingSet = new Set(
-      ((existing ?? []) as ExistingPostingRow[]).map((r) => `${r.source_site}_${r.external_id}`),
-    );
-    const newPostings = matched.filter((p) => !existingSet.has(`${p.sourceSite}_${p.externalId}`));
+    const { data: existing } = await supabase.from('job_postings').select('id, source_site, external_id, expires_at');
+    const existingMap = new Map<string, ExistingPostingRow>();
+    for (const r of (existing ?? []) as ExistingPostingRow[]) existingMap.set(`${r.source_site}_${r.external_id}`, r);
+    const newPostings = matched.filter((p) => !existingMap.has(`${p.sourceSite}_${p.externalId}`));
 
     const rows = [];
     const notifiable: { posting: JobPosting; reason: string; tier: ReturnType<typeof tierFromRating> }[] = [];
@@ -147,6 +150,8 @@ export async function GET(request: NextRequest) {
       await supabase.from('job_postings').upsert(rows, { onConflict: 'source_site,external_id' });
     }
 
+    const refreshedCount = await refreshExpiryDates(matched, existingMap);
+    const alwaysOpenCount = await deleteAlwaysOpenPostings(candidates, existingMap);
     const expiredCount = await deleteExpiredPostings();
     const backfilledCount = await backfillMissingRatings(jobplanetStats);
 
@@ -189,6 +194,8 @@ export async function GET(request: NextRequest) {
       notifiedCount: notifiable.length,
       excludedCount: newPostings.length - notifiable.length,
       backfilledCount,
+      refreshedCount,
+      alwaysOpenCount,
       expiredCount,
       jobplanet: jobplanetStats,
       authFailures,
@@ -196,6 +203,71 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     return NextResponse.json({ error: 'Check failed', detail: String(err) }, { status: 500 });
   }
+}
+
+/**
+ * 이미 저장된 공고의 마감일을 이번에 받아온 값으로 맞춘다.
+ *
+ * 저장은 "신규 공고"에만 걸려 있어서, 마감일 컬럼을 새로 만든 시점에 이미 있던 공고는
+ * 영영 마감일이 비어 있었다(실제로 193건 전부가 그랬다). 평점 백필과 같은 이유·같은 처방.
+ * 사이트가 마감일을 연장하거나 상시채용으로 바꾸는 경우도 여기서 따라간다.
+ *
+ * 값이 그대로인 건 건드리지 않는다 — 첫 사이클만 대량 갱신이고 이후엔 몇 건이면 끝난다.
+ */
+async function refreshExpiryDates(
+  matched: JobPosting[],
+  existingMap: Map<string, ExistingPostingRow>,
+): Promise<number> {
+  const changed: { id: number; expiresAt: string | null }[] = [];
+
+  for (const p of matched) {
+    const row = existingMap.get(`${p.sourceSite}_${p.externalId}`);
+    if (!row) continue; // 신규 공고는 저장 단계에서 이미 마감일이 들어갔다
+    if (sameInstant(row.expires_at, p.expiresAt)) continue;
+    changed.push({ id: row.id, expiresAt: p.expiresAt });
+  }
+
+  // 한 건씩 순차로 돌리면 첫 사이클에 200번 왕복해 실행 시간을 잡아먹는다.
+  for (let i = 0; i < changed.length; i += EXPIRY_REFRESH_CHUNK) {
+    const chunk = changed.slice(i, i + EXPIRY_REFRESH_CHUNK);
+    await Promise.all(
+      chunk.map((c) => supabase.from('job_postings').update({ expires_at: c.expiresAt }).eq('id', c.id)),
+    );
+  }
+
+  return changed.length;
+}
+
+/**
+ * 상시채용으로 바뀌었거나, 상시채용 제외 규칙이 생기기 전에 이미 저장된 공고를 지운다.
+ *
+ * 필터(matchesCriteria)는 새로 들어오는 걸 막을 뿐이라, 이미 DB에 있는 상시채용 공고는
+ * 그대로 남는다. 어댑터가 돌려준 후보(candidates)에는 걸러지기 전 원본이 다 들어 있어서
+ * "이번에 상시채용이라고 표기된 공고"를 정확히 짚어낼 수 있다.
+ * 관심기업으로 별을 눌러둔 건 남긴다 — 사용자가 직접 표시한 것이기 때문.
+ */
+async function deleteAlwaysOpenPostings(
+  candidates: JobPosting[],
+  existingMap: Map<string, ExistingPostingRow>,
+): Promise<number> {
+  const ids: number[] = [];
+  for (const p of candidates) {
+    if (!p.alwaysOpen) continue;
+    const row = existingMap.get(`${p.sourceSite}_${p.externalId}`);
+    if (row) ids.push(row.id);
+  }
+  if (ids.length === 0) return 0;
+
+  const { data } = await supabase.from('job_postings').delete().in('id', ids).eq('starred', false).select('id');
+  return (data ?? []).length;
+}
+
+/** 타임스탬프 표기가 달라도(`+00:00` vs `.000Z`) 같은 시각이면 갱신하지 않기 위한 비교 */
+function sameInstant(a: string | null, b: string | null): boolean {
+  if (a === null || b === null) return a === b;
+  const ta = new Date(a).getTime();
+  const tb = new Date(b).getTime();
+  return Number.isNaN(ta) || Number.isNaN(tb) ? a === b : ta === tb;
 }
 
 /**
@@ -275,6 +347,7 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
       url: row.url,
       postedAt: null,
       expiresAt: null,
+      alwaysOpen: false,
     };
 
     await supabase
