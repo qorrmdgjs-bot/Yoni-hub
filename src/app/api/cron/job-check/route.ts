@@ -179,24 +179,30 @@ async function getJobplanetRating(company: string): Promise<number | null> {
 
   const { data } = await supabase.from('jobplanet_ratings_cache').select('*').eq('company_normalized', key).maybeSingle();
   const cached = data as RatingCacheRow | null;
-  if (cached) {
+  // rating이 null인 캐시(조회 실패 또는 미확정)는 신뢰하지 않고 매번 재시도한다.
+  // 그래야 차단·일시 오류로 실패했던 회사도 다음 사이클에 다시 시도된다.
+  if (cached && cached.rating !== null) {
     const ageDays = (Date.now() - new Date(cached.fetched_at).getTime()) / (1000 * 60 * 60 * 24);
     if (ageDays < JOBPLANET_CACHE_DAYS) return cached.rating;
   }
 
   try {
     const result = await fetchCompanyRating(company);
-    await supabase.from('jobplanet_ratings_cache').upsert(
-      {
-        company_normalized: key,
-        rating: result?.rating ?? null,
-        jobplanet_url: result?.url ?? null,
-        fetched_at: new Date().toISOString(),
-      },
-      { onConflict: 'company_normalized' },
-    );
-    return result?.rating ?? null;
+    if (result?.rating != null) {
+      // 성공(평점을 실제로 찾은 경우)만 캐싱한다 — 실패/미발견을 캐싱하면 재시도 기회가 없어진다.
+      await supabase.from('jobplanet_ratings_cache').upsert(
+        {
+          company_normalized: key,
+          rating: result.rating,
+          jobplanet_url: result.url ?? null,
+          fetched_at: new Date().toISOString(),
+        },
+        { onConflict: 'company_normalized' },
+      );
+      return result.rating;
+    }
+    return null;
   } catch {
-    return cached?.rating ?? null; // 조회 실패 시 캐시가 있으면 그거라도, 없으면 null(평점없음 취급)
+    return null; // 조회 실패 — 캐싱하지 않아 다음 사이클에 재시도된다.
   }
 }
