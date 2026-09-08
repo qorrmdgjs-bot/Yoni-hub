@@ -2,8 +2,8 @@ name: 채용공고 알림 체크
 
 on:
   schedule:
-    # 하루 2번: 한국시간(KST, UTC+9) 오전 11시 · 오후 3시 = UTC 02:00 · 06:00
-    - cron: '0 2,6 * * *'
+    # 하루 1번: 한국시간(KST, UTC+9) 오후 1시 = UTC 04:00
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 jobs:
