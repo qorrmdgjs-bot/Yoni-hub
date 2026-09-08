@@ -20,3 +20,16 @@ body {
   color: var(--foreground);
   font-family: var(--font-handwriting), 'Gamja Flower', cursive;
 }
+
+/*
+ * Job Finder(/job)는 다른 채용사이트처럼 보여야 해서 전역 손글씨 폰트를 안 쓴다.
+ * :has()라서 다른 라우트로 나가면 자동으로 18px·손글씨체로 복귀한다.
+ */
+html:has(.jobfinder-root) {
+  font-size: 16px;
+}
+
+.jobfinder-root {
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans KR', sans-serif;
+  color: #111827;
+}
