@@ -6,7 +6,7 @@ import * as jobkorea from '@job/sites/jobkorea';
 import * as remember from '@job/sites/remember';
 import { fetchCompanyRating } from '@job/sites/jobplanet';
 import { normalizeCompany } from '@job/lib/company';
-import { matchesCriteria, detectPerkTags, tierFromRating, buildReason } from '@job/criteria';
+import { matchesCriteria, detectPerkTags, tierFromRating, buildReason, locationAllowed } from '@job/criteria';
 import { sendNtfy } from '@/utils/ntfy';
 import { supabase } from '@/lib/supabase';
 
@@ -29,6 +29,8 @@ const JOBPLANET_MIN_GAP_MS = process.env.JINA_API_KEY ? 300 : 3_400;
 const JOBPLANET_BACKFILL_BUDGET_MS = 60_000;
 /** 기존 공고 마감일 갱신을 몇 건씩 묶어 보낼지 (Supabase에 한꺼번에 몰지 않기 위한 상한) */
 const EXPIRY_REFRESH_CHUNK = 10;
+/** 한 번의 delete 요청에 넣을 id 개수 상한 (id 목록이 길어지면 URL이 터진다) */
+const DELETE_CHUNK = 100;
 
 const ADAPTERS: { site: SourceSite; fetchPostings: () => Promise<SiteAdapterResult> }[] = [
   { site: 'saramin', fetchPostings: saramin.fetchPostings },
@@ -46,6 +48,7 @@ interface ExistingPostingRow {
   id: number;
   source_site: string;
   external_id: string;
+  location: string | null;
   expires_at: string | null;
 }
 
@@ -110,7 +113,9 @@ export async function GET(request: NextRequest) {
 
     const matched = candidates.filter(matchesCriteria);
 
-    const { data: existing } = await supabase.from('job_postings').select('id, source_site, external_id, expires_at');
+    const { data: existing } = await supabase
+      .from('job_postings')
+      .select('id, source_site, external_id, location, expires_at');
     const existingMap = new Map<string, ExistingPostingRow>();
     for (const r of (existing ?? []) as ExistingPostingRow[]) existingMap.set(`${r.source_site}_${r.external_id}`, r);
     const newPostings = matched.filter((p) => !existingMap.has(`${p.sourceSite}_${p.externalId}`));
@@ -152,6 +157,7 @@ export async function GET(request: NextRequest) {
 
     const refreshedCount = await refreshExpiryDates(matched, existingMap);
     const alwaysOpenCount = await deleteAlwaysOpenPostings(candidates, existingMap);
+    const outOfAreaCount = await deleteOutOfAreaPostings(existingMap);
     const expiredCount = await deleteExpiredPostings();
     const backfilledCount = await backfillMissingRatings(jobplanetStats);
 
@@ -196,6 +202,7 @@ export async function GET(request: NextRequest) {
       backfilledCount,
       refreshedCount,
       alwaysOpenCount,
+      outOfAreaCount,
       expiredCount,
       jobplanet: jobplanetStats,
       authFailures,
@@ -256,10 +263,36 @@ async function deleteAlwaysOpenPostings(
     const row = existingMap.get(`${p.sourceSite}_${p.externalId}`);
     if (row) ids.push(row.id);
   }
-  if (ids.length === 0) return 0;
+  return deletePostingsByIds(ids);
+}
 
-  const { data } = await supabase.from('job_postings').delete().in('id', ids).eq('starred', false).select('id');
-  return (data ?? []).length;
+/**
+ * 강남·서초 외 지역이 섞인 저장된 공고를 지운다.
+ *
+ * 필터를 강화해도 이미 저장된 공고는 그대로 남는다 — 실제로 지역 규칙을 넣고 배포한 뒤
+ * 화면에 "포항시 남구, 강남구, 광양시" 같은 공고가 그대로 있었다. 마감일·상시채용과
+ * 같은 문제라 여기서 같이 정리한다.
+ *
+ * 저장된 location 문자열만 보고 판단하므로 사이트가 그 공고를 더 내려주지 않아도 정리된다.
+ * location이 비어 있는 행(어댑터 단에서 지역을 이미 걸러 텍스트가 없는 경우)은 건드리지 않는다.
+ */
+async function deleteOutOfAreaPostings(existingMap: Map<string, ExistingPostingRow>): Promise<number> {
+  const ids = [...existingMap.values()]
+    .filter((r) => r.location && !locationAllowed(r.location))
+    .map((r) => r.id);
+
+  return deletePostingsByIds(ids);
+}
+
+/** 관심기업(starred)은 남기고 지운다. id 목록이 길면 URL이 터지므로 나눠 보낸다. */
+async function deletePostingsByIds(ids: number[]): Promise<number> {
+  let deleted = 0;
+  for (let i = 0; i < ids.length; i += DELETE_CHUNK) {
+    const chunk = ids.slice(i, i + DELETE_CHUNK);
+    const { data } = await supabase.from('job_postings').delete().in('id', chunk).eq('starred', false).select('id');
+    deleted += (data ?? []).length;
+  }
+  return deleted;
 }
 
 /** 타임스탬프 표기가 달라도(`+00:00` vs `.000Z`) 같은 시각이면 갱신하지 않기 위한 비교 */
