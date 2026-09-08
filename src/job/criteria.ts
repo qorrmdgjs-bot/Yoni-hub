@@ -70,7 +70,7 @@ export function matchesCriteria(p: JobPosting): boolean {
  * 여러 지역을 한 필드에 담는 건 잡코리아(", " 구분)와 리멤버("; " 구분)뿐이지만,
  * 구분자는 사이트가 바꿀 수 있어 흔한 것들을 다 나눠 본다.
  */
-function locationAllowed(location: string): boolean {
+export function locationAllowed(location: string): boolean {
   const segments = location
     .split(/[;,/·\n]/)
     .map((s) => s.trim())
