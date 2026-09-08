@@ -173,13 +173,10 @@ export default function JobPage() {
           </div>
         )}
 
-        <p className="text-xs text-gray-400 mb-6">
-          ntfy 앱에서 <code className="bg-gray-100 px-1 py-0.5 rounded font-mono">job-alert-yoni</code> 토픽을 구독하면 새 공고를 바로 받아요.
-          잡플래닛 2점 미만은 알림에서 제외돼요.
-        </p>
+        <p className="text-xs text-gray-400 mb-6">잡플래닛 2점 미만은 알림에서 제외돼요.</p>
 
-        <div className="pb-6 mb-6 border-b border-gray-200">
-          <p className="text-sm text-gray-600 leading-relaxed">{CRITERIA_SUMMARY}</p>
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-5 mb-6">
+          <p className="text-sm text-gray-700 leading-relaxed">{CRITERIA_SUMMARY}</p>
 
           <div className="grid sm:grid-cols-2 gap-x-8 gap-y-4 mt-4">
             {CRITERIA_GROUPS.map((group) => (
@@ -187,7 +184,7 @@ export default function JobPage() {
                 <p className="text-xs font-semibold text-gray-500">{group.title} · {group.subtitle}</p>
                 <ul className="mt-1 space-y-0.5">
                   {group.items.map((item) => (
-                    <li key={item.mark} className="text-xs text-gray-400">
+                    <li key={item.mark} className="text-xs text-gray-500">
                       {item.mark} {item.title}
                     </li>
                   ))}
