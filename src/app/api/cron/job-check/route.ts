@@ -100,10 +100,11 @@ export async function GET(request: NextRequest) {
 
     const rows = [];
     const notifiable: { posting: JobPosting; reason: string; tier: ReturnType<typeof tierFromRating> }[] = [];
+    const jobplanetStats: JobplanetStats = { hit: 0, miss: 0, failed: 0, lastError: null };
 
     for (const p of newPostings) {
       const perkTags = detectPerkTags(p);
-      const rating = await getJobplanetRating(p.company);
+      const rating = await getJobplanetRating(p.company, jobplanetStats);
       const tier = tierFromRating(rating);
       const reason = buildReason(p, rating, tier, perkTags);
 
@@ -131,7 +132,18 @@ export async function GET(request: NextRequest) {
       await supabase.from('job_postings').upsert(rows, { onConflict: 'source_site,external_id' });
     }
 
-    const backfilledCount = await backfillMissingRatings();
+    const backfilledCount = await backfillMissingRatings(jobplanetStats);
+
+    if (jobplanetStats.failed > 0) {
+      await supabase.from('job_adapter_health').upsert(
+        { source_site: 'jobplanet', last_error: `${jobplanetStats.failed}건 실패: ${jobplanetStats.lastError}` },
+        { onConflict: 'source_site' },
+      );
+    } else if (jobplanetStats.hit > 0) {
+      await supabase
+        .from('job_adapter_health')
+        .upsert({ source_site: 'jobplanet', last_success_at: new Date().toISOString(), last_error: null }, { onConflict: 'source_site' });
+    }
 
     if (notifiable.length > 0) {
       const lines = notifiable.map(({ posting, reason, tier }) => {
@@ -161,6 +173,7 @@ export async function GET(request: NextRequest) {
       notifiedCount: notifiable.length,
       excludedCount: newPostings.length - notifiable.length,
       backfilledCount,
+      jobplanet: jobplanetStats,
       authFailures,
     });
   } catch (err) {
@@ -176,7 +189,7 @@ export async function GET(request: NextRequest) {
  * 한 사이클에 JOBPLANET_BACKFILL_LIMIT건씩만 처리해 실행 시간을 묶어둔다.
  * 백필로 등급이 바뀌어도 알림은 다시 보내지 않는다 — 이미 알린 공고이기 때문.
  */
-async function backfillMissingRatings(): Promise<number> {
+async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
   const { data } = await supabase
     .from('job_postings')
     .select('id, source_site, external_id, title, company, location, employment_type, career_text, perk_tags, url')
@@ -188,7 +201,7 @@ async function backfillMissingRatings(): Promise<number> {
   let filled = 0;
 
   for (const row of rows) {
-    const rating = await getJobplanetRating(row.company);
+    const rating = await getJobplanetRating(row.company, stats);
     if (rating === null) continue;
 
     const perkTags = row.perk_tags ?? [];
@@ -245,7 +258,15 @@ async function handleAdapterSuccess(site: SourceSite, prevHealth?: AdapterHealth
   }
 }
 
-async function getJobplanetRating(company: string): Promise<number | null> {
+/** 한 사이클 동안의 잡플래닛 조회 결과 집계 — 실패가 조용히 묻히지 않게 응답·health에 남긴다 */
+interface JobplanetStats {
+  hit: number;
+  miss: number;
+  failed: number;
+  lastError: string | null;
+}
+
+async function getJobplanetRating(company: string, stats: JobplanetStats): Promise<number | null> {
   const key = normalizeCompany(company);
   if (!key) return null;
 
@@ -271,9 +292,13 @@ async function getJobplanetRating(company: string): Promise<number | null> {
       },
       { onConflict: 'company_normalized' },
     );
+    if (result?.rating != null) stats.hit++;
+    else stats.miss++;
     return result?.rating ?? null;
-  } catch {
+  } catch (err) {
     // 네트워크 오류·차단 등 조회 실패는 캐싱하지 않는다 — 다음 사이클에 다시 시도해야 하므로.
+    stats.failed++;
+    stats.lastError = String(err);
     return null;
   }
 }
