@@ -16,8 +16,12 @@ const JOBPLANET_CACHE_DAYS = 30;
 const JOBPLANET_MISS_CACHE_DAYS = 3;
 /** 평점이 비어 있는 기존 공고를 한 사이클에 몇 건까지 다시 채울지 */
 const JOBPLANET_BACKFILL_LIMIT = 200;
-/** 잡플래닛 동시 조회 수 — 프록시 무료 한도(분당 20건 안팎)를 넘지 않는 선 */
-const JOBPLANET_CONCURRENCY = 5;
+/**
+ * 잡플래닛 조회 간격. 프록시 무료 한도가 분당 20건 안팎이라 동시 5건으로 돌렸더니
+ * 한 사이클에 23건이 429로 튕겼다. 조회 자체는 1초 안에 끝나므로 동시성 대신
+ * 간격을 둬서 분당 18건 정도로 맞춘다.
+ */
+const JOBPLANET_MIN_GAP_MS = process.env.JINA_API_KEY ? 300 : 3_400;
 /**
  * 백필에 쓸 시간 상한. 잡플래닛을 프록시로 우회하면 1건에 수 초씩 걸려서,
  * 건수만으로 제한하면 함수 실행 시간을 넘길 수 있다. 못 채운 건 다음 사이클에 이어서 한다.
@@ -208,18 +212,19 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
   const deadline = Date.now() + JOBPLANET_BACKFILL_BUDGET_MS;
 
   // 공고 단위가 아니라 "회사 단위"로 조회한다 — 같은 회사 공고가 여러 건이면
-  // 조회는 한 번이면 된다. 프록시 경유가 건당 수 초라 동시에 몇 개씩 돌린다.
+  // 조회는 한 번이면 된다.
   const companies = [...new Set(rows.map((r) => r.company).filter(Boolean))];
   const ratings = new Map<string, number>();
 
-  for (let i = 0; i < companies.length; i += JOBPLANET_CONCURRENCY) {
+  for (const company of companies) {
     if (Date.now() > deadline) break;
-    const chunk = companies.slice(i, i + JOBPLANET_CONCURRENCY);
-    const results = await Promise.all(chunk.map((c) => getJobplanetRating(c, stats)));
-    chunk.forEach((c, idx) => {
-      const rating = results[idx];
-      if (rating !== null) ratings.set(c, rating);
-    });
+
+    const startedAt = Date.now();
+    const rating = await getJobplanetRating(company, stats);
+    if (rating !== null) ratings.set(company, rating);
+
+    const gap = JOBPLANET_MIN_GAP_MS - (Date.now() - startedAt);
+    if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
   }
 
   let filled = 0;
