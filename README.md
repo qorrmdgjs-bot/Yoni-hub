@@ -25,7 +25,7 @@
   - → **PC와 휴대폰의 데이터는 자동으로 동기화되지 않습니다.** 브라우저 데이터를 지우면 사라지므로 백업(내보내기)이 중요합니다.
   - → 접속 **주소가 바뀌면** 브라우저 저장 데이터는 새 주소에서 보이지 않습니다(그래서 URL은 그대로 둡니다).
 - **AI 분석 기능**(다이어트·수면의 `/analysis`)과 **Job Finder(채용공고 알림)**는 서버를 씁니다 —
-  Supabase + Anthropic API, GitHub Actions 자동 체크(하루 2번, 오전 11시·오후 3시) + ntfy 푸시.
+  Supabase + Anthropic API, GitHub Actions 자동 체크(하루 1번, 오후 1시) + ntfy 푸시.
 
 ## 기술 스택
 
