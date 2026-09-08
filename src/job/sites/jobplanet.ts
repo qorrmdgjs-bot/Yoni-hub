@@ -38,21 +38,15 @@ interface CompanyCard {
 }
 
 export async function fetchCompanyRating(companyName: string): Promise<JobplanetRating | null> {
-  const res = await fetch(`https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`, {
-    headers: HEADERS,
-  });
-  if (!res.ok) throw new Error(`jobplanet http ${res.status}`);
-  const html = await res.text();
-
-  const cards = extractCompanyCards(html);
-  if (cards.length === 0) {
-    // 200인데 카드가 하나도 안 잡히면 (a) 정말 없는 회사이거나 (b) 차단·챌린지 페이지를
-    // 받은 것이다. 둘은 대응이 전혀 다르므로 후자는 에러로 올려 보낸다.
-    if (!html.includes('rate_total_avg')) {
-      throw new Error(`jobplanet blocked or markup changed (len=${html.length})`);
-    }
-    return null;
+  // 직접 조회가 되는 환경(로컬 등)에서는 그대로 쓰고, 차단당하면 리더 프록시로 넘어간다.
+  let cards: CompanyCard[];
+  try {
+    cards = await fetchCardsDirect(companyName);
+  } catch {
+    cards = await fetchCardsViaReader(companyName);
   }
+
+  if (cards.length === 0) return null;
 
   const target = normalizeCompany(companyName);
   const exact = cards.find((c) => normalizeCompany(c.name) === target);
@@ -63,6 +57,46 @@ export async function fetchCompanyRating(companyName: string): Promise<Jobplanet
     url: `https://www.jobplanet.co.kr/companies/${best.companyId}`,
     tags: best.tags,
   };
+}
+
+async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
+  const res = await fetch(`https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`, {
+    headers: HEADERS,
+  });
+  if (!res.ok) throw new Error(`jobplanet http ${res.status}`);
+  const html = await res.text();
+
+  const cards = extractCompanyCards(html);
+  // 200인데 카드가 하나도 안 잡히고 평점 필드 자체가 없으면 차단·챌린지 페이지를 받은 것이다.
+  // "정말 없는 회사"(빈 배열)와 구분해서 에러로 올려야 프록시 폴백이 걸린다.
+  if (cards.length === 0 && !html.includes('rate_total_avg')) {
+    throw new Error(`jobplanet blocked or markup changed (len=${html.length})`);
+  }
+  return cards;
+}
+
+/**
+ * 잡플래닛은 Cloudflare로 데이터센터 IP를 막는다 — Vercel에서 직접 부르면 403이 뜬다
+ * (실측: 60건 시도 60건 403, 같은 요청이 로컬에서는 100% 200).
+ * 그래서 페이지를 텍스트로 변환해주는 공개 리더 프록시를 경유한다. 프록시가 주는 건
+ * HTML이 아니라 마크다운이라 파싱 규칙이 다르다:
+ *   #### (주)에이블리코퍼레이션 3.1 IT/웹/통신∙서울 … ](https://www.jobplanet.co.kr/companies/339895)
+ * 직접 조회와 같은 결과가 나오는 것은 확인했지만(에이블리 3.1, 삼성전자 3.8 등),
+ * 제3자 서비스라 언제든 느려지거나 막힐 수 있다 — 실패는 job_adapter_health에 남는다.
+ */
+async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> {
+  const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`;
+  const res = await fetch(`https://r.jina.ai/${target}`, { headers: { Accept: 'text/plain' } });
+  if (!res.ok) throw new Error(`jobplanet reader http ${res.status}`);
+  const text = await res.text();
+
+  const cards: CompanyCard[] = [];
+  const re = /####\s+(.+?)\s+(\d(?:\.\d)?)\s[\s\S]*?\]\(https:\/\/www\.jobplanet\.co\.kr\/companies\/(\d+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    cards.push({ name: m[1].trim(), rating: Number(m[2]), companyId: Number(m[3]), tags: [] });
+  }
+  return cards;
 }
 
 function extractCompanyCards(html: string): CompanyCard[] {
