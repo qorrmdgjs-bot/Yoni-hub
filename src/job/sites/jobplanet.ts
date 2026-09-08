@@ -97,9 +97,12 @@ async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
  */
 async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> {
   const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(companyName)}`;
-  const res = await fetch(`https://r.jina.ai/${target}`, {
-    headers: { 'x-engine': 'direct', 'x-return-format': 'html' },
-  });
+  const headers: Record<string, string> = { 'x-engine': 'direct', 'x-return-format': 'html' };
+  // 키 없이도 동작하지만 분당 20건 안팎으로 제한된다. JINA_API_KEY를 넣으면 한도가
+  // 크게 올라가서 백필이 훨씬 빨리 끝난다(무료 키로 충분).
+  if (process.env.JINA_API_KEY) headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
+
+  const res = await fetch(`https://r.jina.ai/${target}`, { headers });
   if (!res.ok) throw new Error(`jobplanet reader http ${res.status}`);
   return extractCompanyCards(await res.text());
 }
