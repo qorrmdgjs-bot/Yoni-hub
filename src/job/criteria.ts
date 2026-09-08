@@ -79,6 +79,10 @@ export function locationAllowed(location: string): boolean {
 
   let hasAllowed = false;
   for (const seg of segments) {
+    // 서울 밖 광역 단위가 먼저다 — "경기 경기전체"처럼 구/시/군 접미사가 없는 표기는
+    // 아래 hasOtherDistrict로는 안 잡힌다.
+    if (OTHER_REGIONS.some((r) => seg.includes(r))) return false;
+
     if (ALLOWED_LOCATIONS.some((l) => seg.includes(l))) {
       hasAllowed = true;
       continue;
@@ -90,6 +94,34 @@ export function locationAllowed(location: string): boolean {
 
   return hasAllowed;
 }
+
+/**
+ * 서울 밖 광역 지자체 이름. 사람인은 "경기 경기전체", 잡코리아는 "경기도"·"충청북도"처럼
+ * 구/시/군 단위가 아닌 표기를 쓰는데, 이게 붙어 있으면 근무지가 강남·서초로 한정되지 않는다.
+ * (실제로 킴스인더스트리 "서울전체 , 강남구 , 경기 경기전체"가 이 규칙 없이 통과했다.)
+ */
+const OTHER_REGIONS = [
+  '경기',
+  '인천',
+  '부산',
+  '대구',
+  '광주',
+  '대전',
+  '울산',
+  '세종',
+  '강원',
+  '충북',
+  '충남',
+  '충청',
+  '전북',
+  '전남',
+  '전라',
+  '경북',
+  '경남',
+  '경상',
+  '제주',
+  '전국',
+];
 
 /** "성남시"·"마포구"처럼 구/시/군 단위 지명이 들어 있는지. 광역시 이름 자체는 지명으로 안 친다 */
 function hasOtherDistrict(segment: string): boolean {
