@@ -103,6 +103,7 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
       perkHints: [],
       url: `https://www.wanted.co.kr/wd/${item.id}`,
       postedAt: null, // 검색 응답에 게시일 필드가 없어 first_seen_at으로 대체
+      expiresAt: null, // 원티드는 마감일을 주지 않는다(상세의 due_time도 항상 null)
     });
   }
 

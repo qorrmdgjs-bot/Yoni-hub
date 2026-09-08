@@ -23,6 +23,8 @@ create table job_postings (
   first_seen_at timestamptz not null default now(),
   notified boolean not null default false,
   starred boolean not null default false,
+  dismissed boolean not null default false,
+  expires_at timestamptz,
   raw jsonb
 );
 create unique index job_postings_source_external_uidx on job_postings (source_site, external_id);
@@ -46,3 +48,7 @@ create table job_adapter_health (
 );
 alter table job_adapter_health enable row level security;
 create policy "anon_all" on job_adapter_health for all to anon using (true) with check (true);
+
+-- 2026-09-08 추가분. 기존 DB에는 아래 두 줄만 실행하면 된다:
+--   alter table job_postings add column if not exists dismissed boolean not null default false;
+--   alter table job_postings add column if not exists expires_at timestamptz;

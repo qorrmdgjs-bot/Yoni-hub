@@ -99,10 +99,52 @@ function extractCards(html: string): JobPosting[] {
       perkHints: [],
       url: `https://www.saramin.co.kr/zf_user/jobs/relay/view?rec_idx=${id}`,
       postedAt: null,
+      expiresAt: parseDeadline(block),
     });
   }
 
   return postings;
+}
+
+/**
+ * 카드에 적힌 마감 표기를 마감 시각으로 바꾼다.
+ * 사람인은 `~09.25(금)`, `D-5`, `오늘마감`, `상시채용`, `채용시` 같은 형태로 쓴다.
+ * 연도가 없어서 이미 지난 월이면 내년으로 본다(12월에 뜬 1월 마감 공고 대응).
+ * 상시채용처럼 마감이 없는 건 null — 만료 삭제 대상에서 빠진다.
+ */
+function parseDeadline(block: string): string | null {
+  const text = block.match(/<span class="date">([^<]*)<\/span>/)?.[1]?.trim() ?? '';
+  if (!text || /상시|채용시|수시/.test(text)) return null;
+
+  const endOfDay = (d: Date) => {
+    d.setHours(23, 59, 59, 0);
+    return d.toISOString();
+  };
+
+  if (text.includes('오늘마감')) return endOfDay(new Date());
+  if (text.includes('내일마감')) {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return endOfDay(d);
+  }
+
+  const dday = text.match(/D-(\d+)/);
+  if (dday) {
+    const d = new Date();
+    d.setDate(d.getDate() + Number(dday[1]));
+    return endOfDay(d);
+  }
+
+  const md = text.match(/(\d{1,2})\s*[./]\s*(\d{1,2})/);
+  if (md) {
+    const now = new Date();
+    const month = Number(md[1]) - 1;
+    const d = new Date(now.getFullYear(), month, Number(md[2]));
+    if (d.getTime() < now.getTime() - 1000 * 60 * 60 * 24 * 30) d.setFullYear(now.getFullYear() + 1);
+    return endOfDay(d);
+  }
+
+  return null;
 }
 
 function stripTags(html: string): string {

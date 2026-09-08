@@ -40,6 +40,7 @@ interface RawJob {
   areaCodeList?: string[];
   jobOrIndustryCodeList?: string[];
   benefitNameList?: string[];
+  applicationPeriod?: { start?: string; end?: string };
 }
 
 interface CodeNode {
@@ -107,6 +108,7 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
       perkHints: job.benefitNameList ?? [],
       url: `https://www.jobkorea.co.kr/Recruit/GI_Read/${job.legacyJobNo}`,
       postedAt: job.createdAt ?? null,
+      expiresAt: job.applicationPeriod?.end ?? null,
     });
   }
 

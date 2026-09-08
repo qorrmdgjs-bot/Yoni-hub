@@ -50,6 +50,7 @@ interface RawPosting {
   additional_information?: string;
   recruiting_process?: string;
   starts_at?: string;
+  ends_at?: string | null;
 }
 
 export async function fetchPostings(): Promise<SiteAdapterResult> {
@@ -145,5 +146,6 @@ function toJobPosting(raw: RawPosting): JobPosting | null {
     perkHints: [],
     url: `https://career.rememberapp.co.kr/job/posting/${raw.id}`,
     postedAt: raw.starts_at ?? null,
+    expiresAt: raw.ends_at ?? null,
   };
 }

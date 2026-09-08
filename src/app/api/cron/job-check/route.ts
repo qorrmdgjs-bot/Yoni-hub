@@ -136,6 +136,7 @@ export async function GET(request: NextRequest) {
         reason,
         url: p.url,
         posted_at: p.postedAt,
+        expires_at: p.expiresAt,
         notified: tier !== 'excluded',
       });
 
@@ -146,6 +147,7 @@ export async function GET(request: NextRequest) {
       await supabase.from('job_postings').upsert(rows, { onConflict: 'source_site,external_id' });
     }
 
+    const expiredCount = await deleteExpiredPostings();
     const backfilledCount = await backfillMissingRatings(jobplanetStats);
 
     if (jobplanetStats.failed > 0) {
@@ -187,12 +189,31 @@ export async function GET(request: NextRequest) {
       notifiedCount: notifiable.length,
       excludedCount: newPostings.length - notifiable.length,
       backfilledCount,
+      expiredCount,
       jobplanet: jobplanetStats,
       authFailures,
     });
   } catch (err) {
     return NextResponse.json({ error: 'Check failed', detail: String(err) }, { status: 500 });
   }
+}
+
+/**
+ * 마감이 지난 공고를 지운다. 지원할 수 없는 공고가 목록에 남아 있어도 방해만 된다.
+ *
+ * 관심기업으로 별을 눌러둔 공고는 남긴다 — 사용자가 직접 표시한 것이라
+ * 마감됐다는 이유로 말없이 지우면 안 된다.
+ * 마감일을 안 주는 사이트(원티드)나 상시채용은 expires_at이 null이라 대상이 아니다.
+ */
+async function deleteExpiredPostings(): Promise<number> {
+  const { data } = await supabase
+    .from('job_postings')
+    .delete()
+    .lt('expires_at', new Date().toISOString())
+    .eq('starred', false)
+    .select('id');
+
+  return (data ?? []).length;
 }
 
 /**
@@ -253,6 +274,7 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
       perkHints: perkTags,
       url: row.url,
       postedAt: null,
+      expiresAt: null,
     };
 
     await supabase

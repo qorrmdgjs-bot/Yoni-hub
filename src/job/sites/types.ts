@@ -23,6 +23,8 @@ export interface JobPosting {
   perkHints: string[];
   url: string;
   postedAt: string | null;
+  /** 접수 마감 시각. 상시채용이거나 사이트가 알려주지 않으면 null(만료 처리 대상 아님) */
+  expiresAt: string | null;
 }
 
 export interface SiteAdapterResult {

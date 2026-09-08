@@ -19,7 +19,9 @@ interface PostingRow {
   reason: string | null;
   url: string;
   first_seen_at: string;
+  expires_at: string | null;
   starred: boolean;
+  dismissed: boolean;
 }
 
 interface CheckResult {
@@ -27,9 +29,15 @@ interface CheckResult {
   newCount: number;
   notifiedCount: number;
   excludedCount: number;
+  expiredCount?: number;
   authFailures: string[];
   error?: string;
 }
+
+/** 한 회사 공고가 이 수를 넘으면 접어서 보여준다 (유닛블랙 10건처럼 목록을 잡아먹는 경우) */
+const COLLAPSE_FROM = 3;
+/** 수동 확인에 걸리는 대략적인 시간 — 진행률 표시용 기준값 */
+const CHECK_ESTIMATE_SEC = 130;
 
 const SITE_LABEL: Record<string, string> = {
   saramin: '사람인',
@@ -56,6 +64,15 @@ function tierLabel(tier: PostingRow['recommend_tier']) {
   return { label: '평점 정보 없음', className: 'text-gray-400' };
 }
 
+function deadlineLabel(iso: string | null) {
+  if (!iso) return null;
+  const days = Math.ceil((new Date(iso).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  if (days < 0) return '마감';
+  if (days === 0) return '오늘 마감';
+  if (days <= 7) return `D-${days}`;
+  return `~${new Date(iso).getMonth() + 1}/${new Date(iso).getDate()}`;
+}
+
 function StarIcon({ filled }: { filled: boolean }) {
   return (
     <svg
@@ -77,7 +94,16 @@ export default function JobPage() {
   const [viewTab, setViewTab] = useState<'all' | 'starred'>('all');
   const [loading, setLoading] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [expandedCompanies, setExpandedCompanies] = useState<Set<string>>(new Set());
   const [lastCheck, setLastCheck] = useState<CheckResult | null>(null);
+
+  // 확인은 2분 넘게 걸려서, 경과 시간이라도 보여주지 않으면 멈춘 줄 알게 된다.
+  useEffect(() => {
+    if (!checking) return;
+    const timer = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [checking]);
 
   const loadPostings = useCallback(async () => {
     // 평점 없음·2점 미만을 숨기면서 실제로 보이는 건수가 줄어, 넉넉히 받아온다.
@@ -92,6 +118,7 @@ export default function JobPage() {
 
   const handleManualCheck = async () => {
     setChecking(true);
+    setElapsed(0);
     try {
       const res = await fetch('/api/cron/job-check?manual=true');
       const result: CheckResult = await res.json();
@@ -109,6 +136,20 @@ export default function JobPage() {
     await supabase.from('job_postings').update({ starred: next }).eq('id', p.id);
   };
 
+  const toggleDismiss = async (p: PostingRow) => {
+    const next = !p.dismissed;
+    setPostings((prev) => prev.map((row) => (row.id === p.id ? { ...row, dismissed: next } : row)));
+    await supabase.from('job_postings').update({ dismissed: next }).eq('id', p.id);
+  };
+
+  const toggleCompany = (company: string) =>
+    setExpandedCompanies((prev) => {
+      const next = new Set(prev);
+      if (next.has(company)) next.delete(company);
+      else next.add(company);
+      return next;
+    });
+
   const byTier = (a: PostingRow, b: PostingRow) => {
     const rank = { strong: 0, normal: 1, null: 2, excluded: 3 } as const;
     const ra = rank[a.recommend_tier ?? 'null'];
@@ -118,13 +159,43 @@ export default function JobPage() {
   };
 
   const starredSorted = postings.filter((p) => p.starred).sort(byTier);
-  // 평점이 확인된 공고만 기본으로 보여준다. 잡플래닛에 없는 회사(평점 없음)와
-  // 2점 미만은 판단에 쓸 수 없으니 목록에서 빼고, 토글로만 확인할 수 있게 한다.
-  const isHidden = (p: PostingRow) => p.recommend_tier === 'excluded' || p.recommend_tier === null;
+  // 평점이 확인된 공고만 기본으로 보여준다. 잡플래닛에 없는 회사(평점 없음), 2점 미만,
+  // 그리고 직접 "관심없음"으로 접은 공고는 빼고, 토글로만 확인할 수 있게 한다.
+  const isHidden = (p: PostingRow) => p.recommend_tier === 'excluded' || p.recommend_tier === null || p.dismissed;
   const visible = postings.filter((p) => showHidden || !isHidden(p));
   const sorted = [...visible].sort(byTier);
   const hiddenCount = postings.filter(isHidden).length;
   const listed = viewTab === 'starred' ? starredSorted : sorted;
+
+  // 한 회사가 공고를 여러 개 올리면 목록을 독차지한다(유닛블랙 10건). 같은 회사가
+  // COLLAPSE_FROM건 이상이면 첫 건만 남기고 접는다. 관심기업 탭은 접지 않는다 —
+  // 직접 고른 것들이라 그대로 다 보이는 게 맞다.
+  const rows: PostingRow[] = [];
+  const collapsedExtra = new Map<number, number>(); // 대표 공고 id → 접힌 나머지 건수
+
+  if (viewTab === 'starred') {
+    rows.push(...listed);
+  } else {
+    const byCompany = new Map<string, PostingRow[]>();
+    for (const p of listed) {
+      const key = p.company || `__${p.id}`;
+      byCompany.set(key, [...(byCompany.get(key) ?? []), p]);
+    }
+    const done = new Set<string>();
+    for (const p of listed) {
+      const key = p.company || `__${p.id}`;
+      if (done.has(key)) continue;
+      done.add(key);
+
+      const all = byCompany.get(key) ?? [p];
+      if (all.length >= COLLAPSE_FROM && !expandedCompanies.has(key)) {
+        rows.push(all[0]);
+        collapsedExtra.set(all[0].id, all.length - 1);
+      } else {
+        rows.push(...all);
+      }
+    }
+  }
 
   return (
     <div className="jobfinder-root min-h-screen bg-white text-gray-900">
@@ -149,10 +220,26 @@ export default function JobPage() {
         <button
           onClick={handleManualCheck}
           disabled={checking}
-          className="w-full rounded-md py-2.5 px-4 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 mb-4"
+          className="w-full rounded-md py-2.5 px-4 bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 disabled:opacity-50"
         >
-          {checking ? '확인 중...' : '지금 확인하기'}
+          {checking ? `확인 중... ${elapsed}초` : '지금 확인하기'}
         </button>
+
+        {checking ? (
+          <div className="mt-2 mb-4">
+            <div className="h-1 w-full bg-gray-100 rounded overflow-hidden">
+              <div
+                className="h-full bg-blue-500 transition-all duration-1000 ease-linear"
+                style={{ width: `${Math.min(98, (elapsed / CHECK_ESTIMATE_SEC) * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {elapsed < 80 ? '채용사이트 4곳에서 공고를 받아오는 중' : '잡플래닛 평점을 확인하는 중'} · 보통 2분쯤 걸려요
+            </p>
+          </div>
+        ) : (
+          <div className="mb-4" />
+        )}
 
         {lastCheck && (
           <div
@@ -237,41 +324,69 @@ export default function JobPage() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {listed.map((p) => {
+            {rows.map((p) => {
               const tier = tierLabel(p.recommend_tier);
+              const deadline = deadlineLabel(p.expires_at);
+              const extra = collapsedExtra.get(p.id);
               return (
-                <div
-                  key={`${p.source_site}_${p.id}`}
-                  className={`flex gap-2 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${isHidden(p) ? 'opacity-50' : ''}`}
-                >
-                  <button
-                    onClick={() => toggleStar(p)}
-                    className="shrink-0 pt-0.5"
-                    aria-label={p.starred ? '관심기업 해제' : '관심기업으로 등록'}
-                  >
-                    <StarIcon filled={p.starred} />
-                  </button>
-                  <a href={p.url} target="_blank" rel="noopener noreferrer" className="flex gap-3 flex-1 min-w-0">
-                    <div className="shrink-0 w-9 h-9 rounded bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
-                      {(SITE_LABEL[p.source_site] ?? p.source_site).slice(0, 2)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <h3 className="text-[14px] font-semibold text-gray-900 leading-snug">{p.title}</h3>
-                        <span className={`shrink-0 text-[11px] font-medium ${tier.className}`}>{tier.label}</span>
+                <div key={`${p.source_site}_${p.id}`}>
+                  <div className={`flex gap-2 py-3.5 px-2 -mx-2 rounded hover:bg-gray-50 ${isHidden(p) ? 'opacity-50' : ''}`}>
+                    <button
+                      onClick={() => toggleStar(p)}
+                      className="shrink-0 pt-0.5"
+                      aria-label={p.starred ? '관심기업 해제' : '관심기업으로 등록'}
+                    >
+                      <StarIcon filled={p.starred} />
+                    </button>
+                    <a href={p.url} target="_blank" rel="noopener noreferrer" className="flex gap-3 flex-1 min-w-0">
+                      <div className="shrink-0 w-9 h-9 rounded bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-400">
+                        {(SITE_LABEL[p.source_site] ?? p.source_site).slice(0, 2)}
                       </div>
-                      <p className="text-[13px] text-gray-600 mt-0.5">{p.company}</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {[p.location, p.career_text, p.employment_type, SITE_LABEL[p.source_site] ?? p.source_site, timeAgo(p.first_seen_at)]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </p>
-                      {p.reason && <p className="text-xs text-gray-500 mt-1">{p.reason}</p>}
-                    </div>
-                  </a>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-[14px] font-semibold text-gray-900 leading-snug">{p.title}</h3>
+                          <span className={`shrink-0 text-[11px] font-medium ${tier.className}`}>{tier.label}</span>
+                        </div>
+                        <p className="text-[13px] text-gray-600 mt-0.5">{p.company}</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {[p.location, p.career_text, p.employment_type, SITE_LABEL[p.source_site] ?? p.source_site, timeAgo(p.first_seen_at)]
+                            .filter(Boolean)
+                            .join(' · ')}
+                          {deadline && <span className="ml-1.5 text-orange-600 font-medium">{deadline}</span>}
+                        </p>
+                        {p.reason && <p className="text-xs text-gray-500 mt-1">{p.reason}</p>}
+                      </div>
+                    </a>
+                    <button
+                      onClick={() => toggleDismiss(p)}
+                      className="shrink-0 self-start text-gray-300 hover:text-gray-600 text-xs px-1"
+                      aria-label={p.dismissed ? '관심없음 해제' : '관심없음으로 숨기기'}
+                      title={p.dismissed ? '관심없음 해제' : '관심없음'}
+                    >
+                      {p.dismissed ? '↺' : '✕'}
+                    </button>
+                  </div>
+                  {extra ? (
+                    <button
+                      onClick={() => toggleCompany(p.company)}
+                      className="w-full text-left text-xs text-gray-400 hover:text-gray-600 pb-3 pl-[52px]"
+                    >
+                      {p.company} 공고 {extra}건 더 보기
+                    </button>
+                  ) : null}
                 </div>
               );
             })}
+            {viewTab === 'all' &&
+              [...expandedCompanies].length > 0 &&
+              rows.length > 0 && (
+                <button
+                  onClick={() => setExpandedCompanies(new Set())}
+                  className="w-full text-left text-xs text-gray-400 hover:text-gray-600 py-2"
+                >
+                  펼친 회사 모두 접기
+                </button>
+              )}
           </div>
         )}
 
