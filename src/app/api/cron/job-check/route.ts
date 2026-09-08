@@ -12,6 +12,10 @@ import { supabase } from '@/lib/supabase';
 
 const JOB_NTFY_TOPIC = 'job-alert-yoni';
 const JOBPLANET_CACHE_DAYS = 30;
+/** "잡플래닛에 없는 회사"로 판정된 캐시의 유효기간 — 나중에 등록될 수도 있어 짧게 잡는다 */
+const JOBPLANET_MISS_CACHE_DAYS = 3;
+/** 평점이 비어 있는 기존 공고를 한 사이클에 몇 건까지 다시 채울지 */
+const JOBPLANET_BACKFILL_LIMIT = 60;
 
 const ADAPTERS: { site: SourceSite; fetchPostings: () => Promise<SiteAdapterResult> }[] = [
   { site: 'saramin', fetchPostings: saramin.fetchPostings },
@@ -28,6 +32,19 @@ interface AdapterHealthRow {
 interface ExistingPostingRow {
   source_site: string;
   external_id: string;
+}
+
+interface BackfillRow {
+  id: number;
+  source_site: string;
+  external_id: string;
+  title: string;
+  company: string;
+  location: string | null;
+  employment_type: string | null;
+  career_text: string | null;
+  perk_tags: string[] | null;
+  url: string;
 }
 
 interface RatingCacheRow {
@@ -114,6 +131,8 @@ export async function GET(request: NextRequest) {
       await supabase.from('job_postings').upsert(rows, { onConflict: 'source_site,external_id' });
     }
 
+    const backfilledCount = await backfillMissingRatings();
+
     if (notifiable.length > 0) {
       const lines = notifiable.map(({ posting, reason, tier }) => {
         const badge = tier === 'strong' ? '🔥강력추천' : '👍추천';
@@ -141,11 +160,64 @@ export async function GET(request: NextRequest) {
       newCount: newPostings.length,
       notifiedCount: notifiable.length,
       excludedCount: newPostings.length - notifiable.length,
+      backfilledCount,
       authFailures,
     });
   } catch (err) {
     return NextResponse.json({ error: 'Check failed', detail: String(err) }, { status: 500 });
   }
+}
+
+/**
+ * 이미 저장된 공고 중 잡플래닛 평점이 비어 있는 것들을 다시 조회해 채운다.
+ *
+ * 평점 조회는 원래 "신규 공고"에만 걸려 있어서, 저장 시점에 조회가 실패한 공고는
+ * 그 뒤로 영영 "평점 정보 없음"으로 남았다(실제로 에이블리코퍼레이션이 그랬다).
+ * 한 사이클에 JOBPLANET_BACKFILL_LIMIT건씩만 처리해 실행 시간을 묶어둔다.
+ * 백필로 등급이 바뀌어도 알림은 다시 보내지 않는다 — 이미 알린 공고이기 때문.
+ */
+async function backfillMissingRatings(): Promise<number> {
+  const { data } = await supabase
+    .from('job_postings')
+    .select('id, source_site, external_id, title, company, location, employment_type, career_text, perk_tags, url')
+    .is('jobplanet_rating', null)
+    .order('first_seen_at', { ascending: false })
+    .limit(JOBPLANET_BACKFILL_LIMIT);
+
+  const rows = (data ?? []) as BackfillRow[];
+  let filled = 0;
+
+  for (const row of rows) {
+    const rating = await getJobplanetRating(row.company);
+    if (rating === null) continue;
+
+    const perkTags = row.perk_tags ?? [];
+    const tier = tierFromRating(rating);
+    const posting: JobPosting = {
+      sourceSite: row.source_site as SourceSite,
+      externalId: row.external_id,
+      title: row.title,
+      company: row.company,
+      location: row.location,
+      employmentType: row.employment_type,
+      isRegular: null,
+      careerMin: null,
+      careerMax: null,
+      careerText: row.career_text,
+      jdText: null,
+      perkHints: perkTags,
+      url: row.url,
+      postedAt: null,
+    };
+
+    await supabase
+      .from('job_postings')
+      .update({ jobplanet_rating: rating, recommend_tier: tier, reason: buildReason(posting, rating, tier, perkTags) })
+      .eq('id', row.id);
+    filled++;
+  }
+
+  return filled;
 }
 
 async function handleAdapterFailure(site: SourceSite, message: string, prevHealth?: AdapterHealthRow) {
@@ -179,30 +251,29 @@ async function getJobplanetRating(company: string): Promise<number | null> {
 
   const { data } = await supabase.from('jobplanet_ratings_cache').select('*').eq('company_normalized', key).maybeSingle();
   const cached = data as RatingCacheRow | null;
-  // rating이 null인 캐시(조회 실패 또는 미확정)는 신뢰하지 않고 매번 재시도한다.
-  // 그래야 차단·일시 오류로 실패했던 회사도 다음 사이클에 다시 시도된다.
-  if (cached && cached.rating !== null) {
+  if (cached) {
     const ageDays = (Date.now() - new Date(cached.fetched_at).getTime()) / (1000 * 60 * 60 * 24);
-    if (ageDays < JOBPLANET_CACHE_DAYS) return cached.rating;
+    // 평점을 찾은 캐시는 오래 믿고, "잡플래닛에 없는 회사"라는 캐시는 짧게만 믿는다.
+    const ttl = cached.rating !== null ? JOBPLANET_CACHE_DAYS : JOBPLANET_MISS_CACHE_DAYS;
+    if (ageDays < ttl) return cached.rating;
   }
 
   try {
     const result = await fetchCompanyRating(company);
-    if (result?.rating != null) {
-      // 성공(평점을 실제로 찾은 경우)만 캐싱한다 — 실패/미발견을 캐싱하면 재시도 기회가 없어진다.
-      await supabase.from('jobplanet_ratings_cache').upsert(
-        {
-          company_normalized: key,
-          rating: result.rating,
-          jobplanet_url: result.url ?? null,
-          fetched_at: new Date().toISOString(),
-        },
-        { onConflict: 'company_normalized' },
-      );
-      return result.rating;
-    }
-    return null;
+    // 조회 자체는 성공했으므로 결과를 캐싱한다. 평점을 못 찾은 경우(null)도
+    // 짧은 TTL로 캐싱해, 잡플래닛에 아예 없는 회사를 매 사이클 다시 뒤지지 않게 한다.
+    await supabase.from('jobplanet_ratings_cache').upsert(
+      {
+        company_normalized: key,
+        rating: result?.rating ?? null,
+        jobplanet_url: result?.url ?? null,
+        fetched_at: new Date().toISOString(),
+      },
+      { onConflict: 'company_normalized' },
+    );
+    return result?.rating ?? null;
   } catch {
-    return null; // 조회 실패 — 캐싱하지 않아 다음 사이클에 재시도된다.
+    // 네트워크 오류·차단 등 조회 실패는 캐싱하지 않는다 — 다음 사이클에 다시 시도해야 하므로.
+    return null;
   }
 }
