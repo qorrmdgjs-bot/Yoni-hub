@@ -16,6 +16,11 @@ const JOBPLANET_CACHE_DAYS = 30;
 const JOBPLANET_MISS_CACHE_DAYS = 3;
 /** 평점이 비어 있는 기존 공고를 한 사이클에 몇 건까지 다시 채울지 */
 const JOBPLANET_BACKFILL_LIMIT = 60;
+/**
+ * 백필에 쓸 시간 상한. 잡플래닛을 프록시로 우회하면 1건에 수 초씩 걸려서,
+ * 건수만으로 제한하면 함수 실행 시간을 넘길 수 있다. 못 채운 건 다음 사이클에 이어서 한다.
+ */
+const JOBPLANET_BACKFILL_BUDGET_MS = 60_000;
 
 const ADAPTERS: { site: SourceSite; fetchPostings: () => Promise<SiteAdapterResult> }[] = [
   { site: 'saramin', fetchPostings: saramin.fetchPostings },
@@ -198,9 +203,12 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
     .limit(JOBPLANET_BACKFILL_LIMIT);
 
   const rows = (data ?? []) as BackfillRow[];
+  const deadline = Date.now() + JOBPLANET_BACKFILL_BUDGET_MS;
   let filled = 0;
 
   for (const row of rows) {
+    if (Date.now() > deadline) break;
+
     const rating = await getJobplanetRating(row.company, stats);
     if (rating === null) continue;
 
