@@ -4,7 +4,7 @@ import * as saramin from '@job/sites/saramin';
 import * as wanted from '@job/sites/wanted';
 import * as jobkorea from '@job/sites/jobkorea';
 import * as remember from '@job/sites/remember';
-import { fetchCompanyRating } from '@job/sites/jobplanet';
+import { fetchCompanyRating, isJinaKeyActive } from '@job/sites/jobplanet';
 import { normalizeCompany } from '@job/lib/company';
 import { matchesCriteria, detectPerkTags, tierFromRating, buildReason, locationAllowed } from '@job/criteria';
 import { sendNtfy } from '@/utils/ntfy';
@@ -21,7 +21,15 @@ const JOBPLANET_BACKFILL_LIMIT = 200;
  * 한 사이클에 23건이 429로 튕겼다. 조회 자체는 1초 안에 끝나므로 동시성 대신
  * 간격을 둬서 분당 18건 정도로 맞춘다.
  */
-const JOBPLANET_MIN_GAP_MS = process.env.JINA_API_KEY ? 300 : 3_400;
+const JOBPLANET_GAP_WITH_KEY_MS = 300;
+const JOBPLANET_GAP_FREE_MS = 3_400;
+/**
+ * 간격을 상수로 굳히면 안 된다 — 키가 중간에 거부당해 무료 등급으로 내려가는데도
+ * 300ms로 계속 때리면 전부 429가 된다. 매번 현재 키 상태를 보고 정한다.
+ */
+function jobplanetGapMs(): number {
+  return isJinaKeyActive() ? JOBPLANET_GAP_WITH_KEY_MS : JOBPLANET_GAP_FREE_MS;
+}
 /**
  * 백필에 쓸 시간 상한. 잡플래닛을 프록시로 우회하면 1건에 수 초씩 걸려서,
  * 건수만으로 제한하면 함수 실행 시간을 넘길 수 있다. 못 채운 건 다음 사이클에 이어서 한다.
@@ -95,7 +103,7 @@ export async function GET(request: NextRequest) {
       const result = results[i];
 
       if (result.status === 'rejected') {
-        await handleAdapterFailure(site, String(result.reason), healthMap.get(site));
+        await handleAdapterFailure(site, describeError(result.reason), healthMap.get(site));
         continue;
       }
       if (result.value.authFailed) {
@@ -191,7 +199,7 @@ export async function GET(request: NextRequest) {
           a.site,
           results[i].status === 'fulfilled'
             ? { ok: !results[i].value.authFailed, authFailed: !!results[i].value.authFailed }
-            : { ok: false, error: String((results[i] as PromiseRejectedResult).reason) },
+            : { ok: false, error: describeError((results[i] as PromiseRejectedResult).reason) },
         ]),
       ),
       candidateCount: candidates.length,
@@ -205,6 +213,9 @@ export async function GET(request: NextRequest) {
       outOfAreaCount,
       expiredCount,
       jobplanet: jobplanetStats,
+      // 키가 거부당해 무료 등급으로 내려간 걸 조용히 넘기지 않는다 — 이번에 크레딧이
+      // 떨어진 걸 두 달 동안 아무도 몰랐다.
+      jinaKey: !process.env.JINA_API_KEY ? 'none' : isJinaKeyActive() ? 'active' : 'rejected',
       authFailures,
     });
   } catch (err) {
@@ -352,7 +363,7 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
     const rating = await getJobplanetRating(company, stats);
     if (rating !== null) ratings.set(company, rating);
 
-    const gap = JOBPLANET_MIN_GAP_MS - (Date.now() - startedAt);
+    const gap = jobplanetGapMs() - (Date.now() - startedAt);
     if (gap > 0) await new Promise((resolve) => setTimeout(resolve, gap));
   }
 
@@ -391,6 +402,37 @@ async function backfillMissingRatings(stats: JobplanetStats): Promise<number> {
   }
 
   return filled;
+}
+
+/**
+ * 에러를 원인까지 펼쳐서 문자열로 만든다.
+ *
+ * Node의 fetch는 연결 단계에서 실패하면 전부 "TypeError: fetch failed"로 뭉개고 진짜
+ * 이유를 err.cause에 숨긴다. 그대로 기록하면 차단인지 타임아웃인지 DNS인지 알 수 없어
+ * 고칠 수가 없다(사람인이 실제로 이 상태로 며칠 방치됐다).
+ */
+function describeError(err: unknown): string {
+  const parts: string[] = [];
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 4; depth++) {
+    parts.push(String(cur));
+    cur = cur instanceof Error ? (cur as Error & { cause?: unknown }).cause : undefined;
+  }
+  const codes = collectCodes(err);
+  if (codes) parts.push(codes);
+  return parts.join(' <- ');
+}
+
+/** undici는 ECONNREFUSED·UND_ERR_CONNECT_TIMEOUT 같은 실제 코드를 code 필드에 둔다 */
+function collectCodes(err: unknown): string | null {
+  const codes: string[] = [];
+  let cur: unknown = err;
+  for (let depth = 0; cur && depth < 4; depth++) {
+    const code = (cur as { code?: unknown }).code;
+    if (typeof code === 'string') codes.push(code);
+    cur = cur instanceof Error ? (cur as Error & { cause?: unknown }).cause : undefined;
+  }
+  return codes.length > 0 ? `codes=${codes.join(',')}` : null;
 }
 
 async function handleAdapterFailure(site: SourceSite, message: string, prevHealth?: AdapterHealthRow) {

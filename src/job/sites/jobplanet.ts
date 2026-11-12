@@ -113,14 +113,41 @@ async function fetchCardsDirect(companyName: string): Promise<CompanyCard[]> {
  */
 async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> {
   const target = `https://www.jobplanet.co.kr/search/companies?query=${encodeURIComponent(toSearchQuery(companyName))}`;
-  const headers: Record<string, string> = { 'x-engine': 'direct', 'x-return-format': 'html' };
-  // 키 없이도 동작하지만 분당 20건 안팎으로 제한된다. JINA_API_KEY를 넣으면 한도가
-  // 크게 올라가서 백필이 훨씬 빨리 끝난다(무료 키로 충분).
-  if (process.env.JINA_API_KEY) headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
 
-  const res = await fetch(`https://r.jina.ai/${target}`, { headers });
+  let res = await readerFetch(target, isJinaKeyActive());
+
+  // 키가 거부당하면(크레딧 소진·만료·무효) 키를 떼고 한 번 더 간다. 키 없이도 동작하고
+  // 느려질 뿐이라, 평점이 통째로 비는 것보다 낫다 — 실제로 키 크레딧이 떨어진 날
+  // 132건이 전부 402로 조용히 실패했다.
+  if (!res.ok && isJinaKeyActive() && KEY_REJECTED_STATUSES.includes(res.status)) {
+    jinaKeyDisabled = true;
+    res = await readerFetch(target, false);
+  }
+
   if (!res.ok) throw new Error(`jobplanet reader http ${res.status}`);
   return extractCompanyCards(await res.text());
+}
+
+/** 키 자체가 거부당한 것으로 볼 상태코드. 429(한도 초과)는 키를 떼면 오히려 나빠져서 제외한다. */
+const KEY_REJECTED_STATUSES = [401, 402, 403];
+
+/**
+ * 키가 거부당한 뒤로는 이 사이클 내내 키 없이 간다. 람다가 살아 있는 동안만 유지되므로,
+ * 키를 충전하면 다음 콜드스타트에 자동으로 다시 쓰인다.
+ */
+let jinaKeyDisabled = false;
+
+/** 프록시 키를 지금 쓸 수 있는지. 호출 간격(무료 등급은 더 길게)을 정하는 데도 쓴다. */
+export function isJinaKeyActive(): boolean {
+  return !!process.env.JINA_API_KEY && !jinaKeyDisabled;
+}
+
+function readerFetch(target: string, withKey: boolean): Promise<Response> {
+  const headers: Record<string, string> = { 'x-engine': 'direct', 'x-return-format': 'html' };
+  // 키 없이도 동작하지만 분당 20건 안팎으로 제한된다. JINA_API_KEY를 넣으면 한도가
+  // 크게 올라가서 백필이 훨씬 빨리 끝난다.
+  if (withKey) headers.Authorization = `Bearer ${process.env.JINA_API_KEY}`;
+  return fetch(`https://r.jina.ai/${target}`, { headers });
 }
 
 function extractCompanyCards(html: string): CompanyCard[] {
