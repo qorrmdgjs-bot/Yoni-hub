@@ -56,7 +56,16 @@ interface RawPosting {
 export async function fetchPostings(): Promise<SiteAdapterResult> {
   const authToken = process.env.REMEMBER_AUTH_TOKEN;
   if (!authToken) {
-    return { postings: [], authFailed: true };
+    return { postings: [], authFailed: true, authFailReason: 'REMEMBER_AUTH_TOKEN 환경변수가 비어 있음' };
+  }
+  // 토큰을 통째로 복사하다 보면 "authorization:"까지 따라오거나 "Token token=" 접두사가
+  // 빠지기 쉽다. 값은 못 보여줘도 형식이 틀렸다는 건 알려줄 수 있다.
+  if (!/^Token token=/.test(authToken.trim())) {
+    return {
+      postings: [],
+      authFailed: true,
+      authFailReason: `토큰 형식이 "Token token=..."이 아님 (현재 앞부분: "${authToken.trim().slice(0, 12)}...")`,
+    };
   }
 
   const byId = new Map<string, JobPosting>();
@@ -85,7 +94,7 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
     });
 
     if (res.status === 401 || res.status === 403) {
-      return { postings: [], authFailed: true };
+      return { postings: [], authFailed: true, authFailReason: `토큰이 거부됨 (http ${res.status})` };
     }
     if (!res.ok) throw new Error(`remember http ${res.status}`);
 
@@ -104,7 +113,13 @@ export async function fetchPostings(): Promise<SiteAdapterResult> {
   }
 
   // 토큰이 죽었어도 공개 결과는 쓸모가 있으니 버리지 않고, 갱신 필요만 알린다.
-  return { postings: [...byId.values()], authFailed: !authOk };
+  return {
+    postings: [...byId.values()],
+    authFailed: !authOk,
+    authFailReason: authOk
+      ? undefined
+      : '요청은 200인데 로그인 사용자로 인식되지 않음 — 비로그인 상태에서 받은 토큰일 가능성이 큼',
+  };
 }
 
 function toJobPosting(raw: RawPosting): JobPosting | null {

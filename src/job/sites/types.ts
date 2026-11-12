@@ -37,4 +37,9 @@ export interface SiteAdapterResult {
   postings: JobPosting[];
   /** 인증 만료·키 무효 등 사람이 개입해야 하는 실패. true면 크론이 "갱신 필요" 알림을 1회만 보낸다 */
   authFailed?: boolean;
+  /**
+   * authFailed의 구체적인 이유. "토큰이 없음"과 "토큰이 거부됨"과 "토큰은 통했는데
+   * 비로그인 결과"는 고치는 방법이 완전히 달라서, 뭉뚱그리면 토큰만 몇 번씩 다시 받게 된다.
+   */
+  authFailReason?: string;
 }

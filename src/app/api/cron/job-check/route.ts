@@ -96,6 +96,7 @@ export async function GET(request: NextRequest) {
     const results = await Promise.allSettled(ADAPTERS.map((a) => a.fetchPostings()));
 
     const authFailures: string[] = [];
+    const authFailReasons: Record<string, string> = {};
     const candidates: JobPosting[] = [];
 
     for (let i = 0; i < ADAPTERS.length; i++) {
@@ -108,7 +109,12 @@ export async function GET(request: NextRequest) {
       }
       if (result.value.authFailed) {
         authFailures.push(site);
-        await handleAdapterFailure(site, `${site} 인증/세션 만료`, healthMap.get(site));
+        if (result.value.authFailReason) authFailReasons[site] = result.value.authFailReason;
+        await handleAdapterFailure(
+          site,
+          `${site} 인증/세션 만료${result.value.authFailReason ? ` — ${result.value.authFailReason}` : ''}`,
+          healthMap.get(site),
+        );
         // 인증이 풀려도 받아온 공고가 있으면 버리지 않는다 — 리멤버는 토큰이 죽어도
         // 개인화만 빠진 공개 결과를 주기 때문에 그대로 쓰는 편이 낫다.
         candidates.push(...result.value.postings);
@@ -217,6 +223,7 @@ export async function GET(request: NextRequest) {
       // 떨어진 걸 두 달 동안 아무도 몰랐다.
       jinaKey: !process.env.JINA_API_KEY ? 'none' : isJinaKeyActive() ? 'active' : 'rejected',
       authFailures,
+      authFailReasons,
     });
   } catch (err) {
     return NextResponse.json({ error: 'Check failed', detail: String(err) }, { status: 500 });
