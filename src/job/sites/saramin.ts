@@ -16,6 +16,10 @@ import type { JobPosting, SiteAdapterResult } from './types';
  */
 
 const KEYWORDS = ['회계', '경영지원'];
+/** 연결 실패 1회가 10초를 먹으므로 횟수와 예산을 같이 건다 */
+const MAX_ATTEMPTS = 3;
+const RETRY_GAP_MS = 1_000;
+const ADAPTER_BUDGET_MS = 35_000;
 const LOC_CODES = ['101010', '101150']; // 강남구, 서초구
 const HEADERS = {
   'User-Agent':
@@ -25,20 +29,54 @@ const HEADERS = {
 export async function fetchPostings(): Promise<SiteAdapterResult> {
   const byId = new Map<string, JobPosting>();
 
+  const deadline = Date.now() + ADAPTER_BUDGET_MS;
+
   for (const kw of KEYWORDS) {
     const url =
       `https://www.saramin.co.kr/zf_user/search?searchType=search&searchword=${encodeURIComponent(kw)}` +
       `&loc_cd=${LOC_CODES.join(',')}`;
-    const res = await fetch(url, { headers: HEADERS });
-    if (!res.ok) throw new Error(`saramin http ${res.status}`);
-    const html = await res.text();
 
-    for (const posting of extractCards(html)) {
+    for (const posting of extractCards(await fetchSearchHtml(url, deadline))) {
       byId.set(posting.externalId, posting);
     }
   }
 
   return { postings: [...byId.values()] };
+}
+
+/**
+ * 사람인 검색 HTML을 가져온다. 실패하면 재시도한다.
+ *
+ * Vercel에서 간헐적으로 TCP 연결이 안 맺어진다(실측: UND_ERR_CONNECT_TIMEOUT,
+ * www.saramin.co.kr:443, 10초). 같은 요청이 로컬에서는 6/6 성공에 연결까지 30ms라
+ * 사이트 장애가 아니라 데이터센터 IP 쪽 문제로 보인다. 간헐적이라 재시도로 넘어간다.
+ *
+ * undici 기본 연결 타임아웃이 10초라 실패 한 번에 10초씩 먹는다. 횟수만으로 제한하면
+ * 함수 실행 시간을 넘길 수 있어 전체 예산(deadline)을 같이 본다.
+ */
+async function fetchSearchHtml(url: string, deadline: number): Promise<string> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { headers: HEADERS });
+      // 4xx는 재시도해도 같은 답이 온다. 5xx·연결 실패만 다시 시도한다.
+      if (!res.ok && res.status < 500) throw new Error(`saramin http ${res.status}`);
+      if (res.ok) return await res.text();
+      lastError = new Error(`saramin http ${res.status}`);
+    } catch (err) {
+      if (err instanceof Error && /saramin http 4/.test(err.message)) throw err;
+      lastError = err;
+    }
+
+    if (attempt < MAX_ATTEMPTS && Date.now() + RETRY_GAP_MS < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_GAP_MS));
+    } else {
+      break;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
 function extractCards(html: string): JobPosting[] {
