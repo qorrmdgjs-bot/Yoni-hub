@@ -4,7 +4,7 @@ import * as saramin from '@job/sites/saramin';
 import * as wanted from '@job/sites/wanted';
 import * as jobkorea from '@job/sites/jobkorea';
 import * as remember from '@job/sites/remember';
-import { fetchCompanyRating, isJinaKeyActive } from '@job/sites/jobplanet';
+import { fetchCompanyRating, isJinaKeyActive, jinaKeyStatus } from '@job/sites/jobplanet';
 import { normalizeCompany } from '@job/lib/company';
 import { matchesCriteria, detectPerkTags, tierFromRating, buildReason, locationAllowed } from '@job/criteria';
 import { sendNtfy } from '@/utils/ntfy';
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
       jobplanet: jobplanetStats,
       // 키가 거부당해 무료 등급으로 내려간 걸 조용히 넘기지 않는다 — 이번에 크레딧이
       // 떨어진 걸 두 달 동안 아무도 몰랐다.
-      jinaKey: !process.env.JINA_API_KEY ? 'none' : isJinaKeyActive() ? 'active' : 'rejected',
+      jinaKey: jinaKeyStatus(),
       authFailures,
       authFailReasons,
     });

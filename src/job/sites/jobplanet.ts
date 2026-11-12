@@ -121,6 +121,7 @@ async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> 
   // 132건이 전부 402로 조용히 실패했다.
   if (!res.ok && isJinaKeyActive() && KEY_REJECTED_STATUSES.includes(res.status)) {
     jinaKeyDisabled = true;
+    jinaKeyRejectedStatus = res.status;
     res = await readerFetch(target, false);
   }
 
@@ -128,18 +129,36 @@ async function fetchCardsViaReader(companyName: string): Promise<CompanyCard[]> 
   return extractCompanyCards(await res.text());
 }
 
-/** 키 자체가 거부당한 것으로 볼 상태코드. 429(한도 초과)는 키를 떼면 오히려 나빠져서 제외한다. */
-const KEY_REJECTED_STATUSES = [401, 402, 403];
+/**
+ * 키 자체가 거부당한 것으로 볼 상태코드.
+ *
+ * 401(인증 실패)과 402(결제 필요)만 키 문제다. 403은 처음에 같이 넣었다가 뺐다 —
+ * 리더 프록시는 대상 사이트의 상태를 그대로 돌려줄 수 있어서, 잡플래닛이 403을 주면
+ * 멀쩡한 키를 "거부됨"으로 오판하고 떼어버린다. 429(한도 초과)도 제외한다 — 그 상황에
+ * 키를 떼면 한도가 더 낮아져서 오히려 나빠진다.
+ */
+const KEY_REJECTED_STATUSES = [401, 402];
 
 /**
  * 키가 거부당한 뒤로는 이 사이클 내내 키 없이 간다. 람다가 살아 있는 동안만 유지되므로,
  * 키를 충전하면 다음 콜드스타트에 자동으로 다시 쓰인다.
  */
 let jinaKeyDisabled = false;
+/** 키를 떼게 만든 상태코드. 402인지 401인지에 따라 사용자가 할 일이 다르다. */
+let jinaKeyRejectedStatus: number | null = null;
 
 /** 프록시 키를 지금 쓸 수 있는지. 호출 간격(무료 등급은 더 길게)을 정하는 데도 쓴다. */
 export function isJinaKeyActive(): boolean {
   return !!process.env.JINA_API_KEY && !jinaKeyDisabled;
+}
+
+/** 키 상태를 사람이 읽을 수 있는 한 줄로. 응답에 실어 조용한 저하를 막는다. */
+export function jinaKeyStatus(): string {
+  if (!process.env.JINA_API_KEY) return 'none';
+  if (!jinaKeyDisabled) return 'active';
+  return jinaKeyRejectedStatus === 402
+    ? 'rejected(402 결제 필요 — 잔액 소진)'
+    : `rejected(http ${jinaKeyRejectedStatus})`;
 }
 
 function readerFetch(target: string, withKey: boolean): Promise<Response> {
